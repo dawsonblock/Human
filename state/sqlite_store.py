@@ -157,7 +157,61 @@ class SQLiteRunStore:
                 for r in rows
             ]
 
+    def apply_cycle_transition(
+        self,
+        run_id: str,
+        new_state: AgentStateV2_1,
+        cycle_events: list[tuple[str, dict[str, Any]]],
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Atomically persist new state and all cycle events in one transaction.
+
+        Returns the list of committed event records (with assigned seqs and
+        timestamps) so callers can fan them out to live subscribers without a
+        second DB round-trip.
+        """
+        now = time.time()
+        state_payload = json.dumps(state_to_dict(new_state))
+        committed: list[dict[str, Any]] = []
+
+        with self._conn() as conn:
+            if status is None:
+                conn.execute(
+                    'UPDATE runs SET state_json = ?, updated_at = ? WHERE run_id = ?',
+                    (state_payload, now, run_id),
+                )
+            else:
+                conn.execute(
+                    'UPDATE runs SET state_json = ?, status = ?, updated_at = ? WHERE run_id = ?',
+                    (state_payload, status, now, run_id),
+                )
+
+            row = conn.execute(
+                'SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?',
+                (run_id,),
+            ).fetchone()
+            next_seq = int(row[0]) + 1 if row else 1
+
+            for event_type, payload in cycle_events:
+                conn.execute(
+                    'INSERT INTO run_events (run_id, seq, event_type, event_json, created_at) VALUES (?, ?, ?, ?, ?)',
+                    (run_id, next_seq, event_type, json.dumps(payload), now),
+                )
+                committed.append({
+                    'run_id': run_id,
+                    'seq': next_seq,
+                    'type': event_type,
+                    'payload': payload,
+                    'created_at': now,
+                })
+                next_seq += 1
+
+            conn.commit()
+
+        return committed
+
     def append_event(self, run_id: str, seq: int, event_type: str, payload: dict[str, Any]) -> float:
+        """Persist a single event.  Used by EventManager.publish for lifecycle events."""
         created_at = time.time()
         with self._conn() as conn:
             conn.execute(

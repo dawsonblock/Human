@@ -17,6 +17,5 @@ class InputRequest(BaseModel):
     inputs: dict = Field(default_factory=dict)
 
 
-class CycleRequest(BaseModel):
-    inputs: dict = Field(default_factory=dict)
-    idle_tick: bool = False
+class ApprovalDecision(BaseModel):
+    action_id: str

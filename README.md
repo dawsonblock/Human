@@ -1,15 +1,20 @@
-# subjective_runtime_v2_1 scaffold — phase 2
+# subjective_runtime_v2_1
 
-This scaffold now includes a real second phase:
+A credible runtime testbed for integrated, temporally extended, self-affecting cognition — Phase 3.
 
-- SQLite-backed run state snapshots
-- append-only durable event log
-- live event fan-out for SSE
-- run supervisors with pause/resume/stop and idle ticks
-- a scheduler that can recover running or paused runs from persistence
-- a FastAPI transport layer for creating runs, enqueueing input, listing state, and streaming events
+## What is in here
 
-What it still is not:
+- SQLite-backed run state with **atomic state+event commits** via `apply_cycle_transition`
+- Append-only durable event log with live SSE fan-out
+- `RuntimeCore.cycle()` returns a pure `CycleResult`; persistence is the supervisor's responsibility
+- Run supervisors with pause/resume/stop, idle ticks, and `_cycle_lock` as the single execution authority
+- Scheduler that recovers running or paused runs from persistence on startup
+- `memory_write` tool routes writes by kind into durable state (`working_memory`, `episodic_trace`, `self_history`)
+- Homeostatic regulation, explore/exploit mode switching, hypothesis generation, bounded associative synthesis, idle-time consolidation
+- Working-memory promotion: every cycle leaves a compact "what mattered" packet
+- Approval flow: `POST /runs/{run_id}/approve` and `POST /runs/{run_id}/deny`
+
+## What it is not
 
 - not a finished cognition runtime
 - not production-grade
@@ -26,20 +31,35 @@ pytest
 uvicorn subjective_runtime_v2_1.api.app:app --reload
 ```
 
-## Core transport endpoints
+## API endpoints
 
-- `POST /runs`
-- `GET /runs`
-- `GET /runs/{run_id}/state`
-- `POST /runs/{run_id}/input`
-- `POST /runs/{run_id}/pause`
-- `POST /runs/{run_id}/resume`
-- `DELETE /runs/{run_id}`
-- `GET /runs/{run_id}/events`
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/runs` | Create a new run |
+| GET | `/runs` | List all runs |
+| GET | `/runs/{run_id}/state` | Current state snapshot |
+| POST | `/runs/{run_id}/input` | Enqueue external input |
+| POST | `/runs/{run_id}/pause` | Pause execution |
+| POST | `/runs/{run_id}/resume` | Resume execution |
+| DELETE | `/runs/{run_id}` | Stop and clean up |
+| GET | `/runs/{run_id}/events` | SSE stream of events |
+| POST | `/runs/{run_id}/approve` | Approve a pending action |
+| POST | `/runs/{run_id}/deny` | Deny a pending action |
 
-The authoritative long-lived state is still a snapshot plus event-log scaffold. The event log is intended to become the canonical causal record as the system matures.
+## Authority path
 
+```
+input queue → supervisor (_cycle_lock) → RuntimeCore.cycle() → CycleResult
+  → SQLiteRunStore.apply_cycle_transition() [atomic state+events]
+  → EventManager.fan_out() [live SSE]
+```
 
-## Phase 3 additions
+Lifecycle events (pause, resume, stop) continue to go through `EventManager.publish()`.
 
-This scaffold now includes homeostatic regulation, explore/exploit mode switching, hypothesis generation, bounded associative synthesis, and idle-time consolidation. These additions make the runtime more adaptive under stress, more exploratory when stable, and better at turning discrepancies into explanations. They do not imply consciousness or sentience.
+## What is stubbed
+
+- `http_get` tool: network calls are not implemented
+- No external language model integration
+- Planner proposes echo/memory_write actions; real epistemic probes are not yet wired
+- Self-model and world-model updates are heuristic, not learned
+

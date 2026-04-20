@@ -7,6 +7,7 @@ from typing import Any
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.util.time import now_ts
 
 
 @dataclass(slots=True)
@@ -53,6 +54,9 @@ class RunSupervisor:
         state = self.run_store.load_state(self.run_id)
         if state is not None:
             self.run_store.save_state(self.run_id, state, status='running')
+            # Seed the runtime's internal buffer so the first cycle loads from
+            # the persisted state rather than a fresh AgentStateV2_1.
+            self.runtime.state_store.save(self.run_id, state)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_loop())
         await self.events.publish(self.run_id, 'run_supervisor_started', {'config': asdict(self.config)})
@@ -89,6 +93,53 @@ class RunSupervisor:
         await self._input_queue.put(inputs)
         await self.events.publish(self.run_id, 'input_enqueued', {'inputs': inputs})
 
+    async def approve_action(self, action_id: str) -> bool:
+        """Mark the pending approval request as approved and re-queue for execution."""
+        async with self._cycle_lock:
+            state = self.run_store.load_state(self.run_id)
+            if state is None:
+                return False
+            matched = False
+            for req in state.approval_requests:
+                if req.get("action_id") == action_id and req.get("status") == "pending":
+                    req["status"] = "approved"
+                    req["decided_at"] = now_ts()
+                    matched = True
+            if not matched:
+                return False
+            self.run_store.save_state(self.run_id, state)
+            self.runtime.state_store.save(self.run_id, state)
+        await self.events.publish(
+            self.run_id,
+            'approval_granted',
+            {'action_id': action_id, 'decided_at': now_ts()},
+        )
+        await self._input_queue.put({"_approval_granted": action_id})
+        return True
+
+    async def deny_action(self, action_id: str) -> bool:
+        """Mark the pending approval request as denied."""
+        async with self._cycle_lock:
+            state = self.run_store.load_state(self.run_id)
+            if state is None:
+                return False
+            matched = False
+            for req in state.approval_requests:
+                if req.get("action_id") == action_id and req.get("status") == "pending":
+                    req["status"] = "denied"
+                    req["decided_at"] = now_ts()
+                    matched = True
+            if not matched:
+                return False
+            self.run_store.save_state(self.run_id, state)
+            self.runtime.state_store.save(self.run_id, state)
+        await self.events.publish(
+            self.run_id,
+            'approval_denied',
+            {'action_id': action_id, 'decided_at': now_ts()},
+        )
+        return True
+
     async def _run_loop(self) -> None:
         while not self._stopped:
             if self._paused:
@@ -104,50 +155,17 @@ class RunSupervisor:
             idle_tick = len(pending_inputs) == 0
 
             async with self._cycle_lock:
-                state = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
+                result = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
 
-            if state.last_action is not None:
-                await self.events.publish(
-                    self.run_id,
-                    'tool_call_proposed',
-                    {'cycle_id': state.cycle_id, 'last_action': state.last_action},
-                )
-            if state.last_outcome is not None:
-                event_type = 'tool_call_executed' if state.last_outcome.get('status') == 'ok' else 'tool_call_failed'
-                await self.events.publish(
-                    self.run_id,
-                    event_type,
-                    {'cycle_id': state.cycle_id, 'last_action': state.last_action, 'last_outcome': state.last_outcome},
-                )
-            if state.approval_requests:
-                latest = state.approval_requests[-1]
-                if latest.get('status') == 'pending':
-                    await self.events.publish(self.run_id, 'approval_requested', latest)
+            # Atomically commit state + all cycle events to SQLite, then fan out
+            committed = self.run_store.apply_cycle_transition(
+                self.run_id,
+                result.new_state,
+                result.events,
+            )
+            await self.events.fan_out(committed)
 
-            await self.events.publish(
-                self.run_id,
-                'cycle_completed',
-                {
-                    'cycle_id': state.cycle_id,
-                    'idle_tick': idle_tick,
-                    'focus': [c.kind for c in state.active_focus],
-                    'tensions': [t.kind for t in state.tensions],
-                    'last_action': state.last_action,
-                    'last_outcome': state.last_outcome,
-                },
-            )
-            await self.events.publish(
-                self.run_id,
-                'state_updated',
-                {
-                    'cycle_id': state.cycle_id,
-                    'regulation': state.regulation,
-                    'continuity_summary': state.continuity_field.summary,
-                    'cognitive_mode': state.cognitive_mode,
-                    'risk_appetite': state.risk_appetite,
-                },
-            )
-            await asyncio.sleep(self._compute_sleep_interval(state, idle_tick))
+            await asyncio.sleep(self._compute_sleep_interval(result.new_state, idle_tick))
 
     async def _drain_inputs(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

@@ -8,10 +8,15 @@ from subjective_runtime_v2_1.action.tools.http_get import HttpGetTool
 from subjective_runtime_v2_1.action.tools.memory_write import MemoryWriteTool
 
 
-def build_tool_registry(memory_sink: list[dict], allowed_roots: list[str]) -> ToolRegistry:
+def build_tool_registry(allowed_roots: list[str], memory_sink: list[dict] | None = None) -> ToolRegistry:
+    """Build and return the default tool registry.
+
+    ``memory_sink`` is accepted for backward compatibility but ignored; memory
+    writes now produce state mutations via ``ToolResult.memory_writes``.
+    """
     registry = ToolRegistry()
     registry.register(EchoTool())
-    registry.register(MemoryWriteTool(memory_sink))
+    registry.register(MemoryWriteTool())
     registry.register(FileReadTool(allowed_roots=allowed_roots))
     registry.register(FileWriteTool(allowed_roots=allowed_roots))
     registry.register(HttpGetTool())

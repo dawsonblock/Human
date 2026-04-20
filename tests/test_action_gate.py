@@ -4,7 +4,7 @@ from subjective_runtime_v2_1.state.models import AgentStateV2_1, ActionOption
 
 
 def test_file_write_requires_approval():
-    registry = build_tool_registry(memory_sink=[], allowed_roots=["."])
+    registry = build_tool_registry(allowed_roots=["."])
     gate = ActionGate(registry)
     state = AgentStateV2_1()
     action = ActionOption(
