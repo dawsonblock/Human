@@ -13,12 +13,12 @@ from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
 from subjective_runtime_v2_1.state.store import InMemoryStateStore
 
 
-class DBAdapter:
-    """Bridge between RuntimeCore's state_store interface and SQLiteRunStore.
+class StateSeeder:
+    """Loads initial state from SQLite to seed RuntimeCore's in-memory buffer.
 
-    RuntimeCore uses this as a read-only seed loader.  Cycle-to-cycle state
-    buffering happens inside RuntimeCore's InMemoryStateStore.  The supervisor
-    persists state + events atomically via apply_cycle_transition.
+    The ``save()`` method is intentionally a no-op: RuntimeCore's internal
+    InMemoryStateStore is the cycle-to-cycle buffer, and the supervisor uses
+    ``apply_cycle_transition`` for atomic state+events commits to SQLite.
     """
     def __init__(self, db: SQLiteRunStore) -> None:
         self.db = db
@@ -31,9 +31,7 @@ class DBAdapter:
         return state
 
     def save(self, run_id: str, state) -> None:
-        # Intentionally a no-op on the DB path: the supervisor uses
-        # apply_cycle_transition for atomic state+events commits.  The
-        # InMemoryStateStore inside RuntimeCore is the cycle-to-cycle buffer.
+        # Intentionally a no-op: supervisor owns persistence via apply_cycle_transition.
         pass
 
 

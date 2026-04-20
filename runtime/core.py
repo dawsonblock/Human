@@ -35,7 +35,7 @@ from subjective_runtime_v2_1.util.time import now_ts
 from subjective_runtime_v2_1.workspace.attention import AttentionGate
 from subjective_runtime_v2_1.workspace.workspace import Workspace
 
-_WORKING_MEMORY_CAP = 12
+_WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
 
 
 @dataclass

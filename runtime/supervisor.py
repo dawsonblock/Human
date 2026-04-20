@@ -54,8 +54,9 @@ class RunSupervisor:
         state = self.run_store.load_state(self.run_id)
         if state is not None:
             self.run_store.save_state(self.run_id, state, status='running')
-            # Seed the runtime's internal buffer so the first cycle loads from
-            # the persisted state rather than a fresh AgentStateV2_1.
+            # Seed the runtime's internal InMemoryStateStore with the persisted
+            # state so the first cycle reads the correct prior state rather than
+            # starting from a blank AgentStateV2_1.
             self.runtime.state_store.save(self.run_id, state)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_loop())
