@@ -88,3 +88,12 @@ class EventManager:
                 created_at=item['created_at'],
             )
             await self.live_bus.publish_live(event)
+
+    async def publish_persisted(self, event: RuntimeEvent) -> None:
+        """Deliver one already-persisted event to live subscribers."""
+        await self.live_bus.publish_live(event)
+
+    async def publish_persisted_batch(self, events: list[RuntimeEvent]) -> None:
+        """Deliver a batch of already-persisted events to live subscribers."""
+        for event in events:
+            await self.live_bus.publish_live(event)

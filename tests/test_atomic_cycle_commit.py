@@ -109,11 +109,11 @@ def test_apply_cycle_transition_state_version_advances(tmp_path):
 
 
 def test_cycle_result_contains_required_events(tmp_path):
-    """CycleResult.events always includes cycle_completed and state_updated."""
+    """CycleTransition.events always includes cycle_completed and state_updated."""
     runtime = _make_runtime()
     result = runtime.cycle("r5", {"text": "test"})
 
-    event_types = [et for et, _ in result.events]
+    event_types = [e.type for e in result.events]
     assert "cycle_completed" in event_types
     assert "state_updated" in event_types
 

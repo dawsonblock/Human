@@ -6,10 +6,13 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from subjective_runtime_v2_1.state.models import AgentStateV2_1
 from subjective_runtime_v2_1.state.store import state_from_dict, state_to_dict
+
+if TYPE_CHECKING:
+    from subjective_runtime_v2_1.runtime.transition import CycleTransition
 
 
 @dataclass(slots=True)
@@ -159,19 +162,41 @@ class SQLiteRunStore:
 
     def apply_cycle_transition(
         self,
-        run_id: str,
-        new_state: AgentStateV2_1,
-        cycle_events: list[tuple[str, dict[str, Any]]],
+        transition_or_run_id,
+        new_state: AgentStateV2_1 | None = None,
+        cycle_events=None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         """Atomically persist new state and all cycle events in one transaction.
 
+        Accepts either:
+        - A ``CycleTransition`` object as the first argument (preferred), or
+        - The legacy positional form: ``(run_id, new_state, cycle_events, status)``
+
         Returns the list of committed event records (with assigned seqs and
-        timestamps) so callers can fan them out to live subscribers without a
-        second DB round-trip.
+        timestamps) so callers can fan them out to live subscribers.
         """
+        # --- resolve arguments ---
+        from subjective_runtime_v2_1.runtime.transition import CycleTransition  # local import avoids circular dep
+        if isinstance(transition_or_run_id, CycleTransition):
+            transition = transition_or_run_id
+            run_id = transition.run_id
+            state = transition.state
+            status = status if status is not None else transition.status_override
+            events_to_commit = [(d.type, d.payload) for d in transition.events]
+        else:
+            run_id = transition_or_run_id
+            state = new_state
+            # Handle both (event_type, payload) tuples and RuntimeEventDraft objects
+            from subjective_runtime_v2_1.runtime.transition import RuntimeEventDraft  # noqa: F401
+            raw = list(cycle_events) if cycle_events else []
+            events_to_commit = [
+                (e.type, e.payload) if isinstance(e, RuntimeEventDraft) else (e[0], e[1])
+                for e in raw
+            ]
+
         now = time.time()
-        state_payload = json.dumps(state_to_dict(new_state))
+        state_payload = json.dumps(state_to_dict(state))
         committed: list[dict[str, Any]] = []
 
         with self._conn() as conn:
@@ -186,29 +211,60 @@ class SQLiteRunStore:
                     (state_payload, status, now, run_id),
                 )
 
-            row = conn.execute(
-                'SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?',
-                (run_id,),
-            ).fetchone()
-            next_seq = int(row[0]) + 1 if row else 1
-
-            for event_type, payload in cycle_events:
-                conn.execute(
-                    'INSERT INTO run_events (run_id, seq, event_type, event_json, created_at) VALUES (?, ?, ?, ?, ?)',
-                    (run_id, next_seq, event_type, json.dumps(payload), now),
-                )
-                committed.append({
-                    'run_id': run_id,
-                    'seq': next_seq,
-                    'type': event_type,
-                    'payload': payload,
-                    'created_at': now,
-                })
-                next_seq += 1
+            committed = self.append_events_tx(conn, run_id, [
+                {"type": et, "payload": p} for et, p in events_to_commit
+            ], now=now)
 
             conn.commit()
 
         return committed
+
+    def append_events_tx(
+        self,
+        conn: sqlite3.Connection,
+        run_id: str,
+        events: list[dict[str, Any]],
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Insert events inside an already-open connection/transaction.
+
+        ``events`` should be a list of dicts with ``type`` and ``payload`` keys.
+        Returns the inserted records with ``seq`` and ``created_at`` filled in.
+        """
+        if now is None:
+            now = time.time()
+        row = conn.execute(
+            'SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?',
+            (run_id,),
+        ).fetchone()
+        next_seq = int(row[0]) + 1 if row else 1
+        committed: list[dict[str, Any]] = []
+        for evt in events:
+            event_type = evt["type"]
+            payload = evt["payload"]
+            conn.execute(
+                'INSERT INTO run_events (run_id, seq, event_type, event_json, created_at) VALUES (?, ?, ?, ?, ?)',
+                (run_id, next_seq, event_type, json.dumps(payload), now),
+            )
+            committed.append({
+                'run_id': run_id,
+                'seq': next_seq,
+                'type': event_type,
+                'payload': payload,
+                'created_at': now,
+            })
+            next_seq += 1
+        return committed
+
+    def update_run_status(self, run_id: str, status: str) -> None:
+        """Update only the status column for a run."""
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?',
+                (status, now, run_id),
+            )
+            conn.commit()
 
     def append_event(self, run_id: str, seq: int, event_type: str, payload: dict[str, Any]) -> float:
         """Persist a single event.  Used by EventManager.publish for lifecycle events."""

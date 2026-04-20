@@ -38,3 +38,4 @@ class ToolResult:
     memory_writes: list[dict[str, Any]] = field(default_factory=list)
     state_delta: dict[str, Any] = field(default_factory=dict)
     observations: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)

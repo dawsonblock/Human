@@ -33,4 +33,5 @@ class Executor:
             "memory_writes": result.memory_writes,
             "state_delta": result.state_delta,
             "observations": result.observations,
+            "artifacts": result.artifacts,
         }

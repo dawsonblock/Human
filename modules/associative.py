@@ -11,14 +11,30 @@ class AssociativeModule(Module):
     def run(self, state: AgentStateV2_1, inputs: dict, bias: InterpretiveBias) -> list[Candidate]:
         if state.cognitive_mode != "EXPLORE":
             return []
-        if len(state.working_memory) < 2:
+        window = state.working_memory[-5:]
+        if len(window) < 2:
             return []
-        a = state.working_memory[-1]
-        b = state.working_memory[-2]
-        kind_a = a.get("kind", "memory")
-        kind_b = b.get("kind", "memory")
-        if kind_a == kind_b:
+
+        # Group items by kind; pick the two most recent items that differ in kind.
+        seen_kinds: dict[str, dict] = {}
+        for item in reversed(window):
+            k = item.get("kind", "memory")
+            if k not in seen_kinds:
+                seen_kinds[k] = item
+            if len(seen_kinds) >= 2:
+                break
+
+        if len(seen_kinds) < 2:
             return []
+
+        kinds = list(seen_kinds.keys())
+        kind_a, kind_b = kinds[0], kinds[1]
+        item_a, item_b = seen_kinds[kind_a], seen_kinds[kind_b]
+
+        recency_a = item_a.get("cycle_id", 0)
+        recency_b = item_b.get("cycle_id", 0)
+        recency_score = 0.5 + 0.5 * min(recency_a, recency_b) / max(max(recency_a, recency_b), 1)
+
         return [Candidate(
             id=new_id("cand"),
             source=self.name,
@@ -32,7 +48,7 @@ class AssociativeModule(Module):
             goal_relevance=0.25,
             uncertainty_reduction=0.05,
             novelty=0.7,
-            recency=0.7,
+            recency=recency_score,
             valuation_alignment=0.1,
             continuity_match=0.2,
             conflict_pressure=0.0,

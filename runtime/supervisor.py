@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
-from subjective_runtime_v2_1.runtime.events import EventManager
+from subjective_runtime_v2_1.runtime.events import EventManager, RuntimeEvent
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
 from subjective_runtime_v2_1.util.time import now_ts
 
@@ -156,17 +156,22 @@ class RunSupervisor:
             idle_tick = len(pending_inputs) == 0
 
             async with self._cycle_lock:
-                result = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
+                transition = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
 
             # Atomically commit state + all cycle events to SQLite, then fan out
-            committed = self.run_store.apply_cycle_transition(
-                self.run_id,
-                result.new_state,
-                result.events,
-            )
-            await self.events.fan_out(committed)
+            committed = self.run_store.apply_cycle_transition(transition)
+            await self.events.publish_persisted_batch([
+                RuntimeEvent(
+                    run_id=row['run_id'],
+                    seq=row['seq'],
+                    type=row['type'],
+                    payload=row['payload'],
+                    created_at=row['created_at'],
+                )
+                for row in committed
+            ])
 
-            await asyncio.sleep(self._compute_sleep_interval(result.new_state, idle_tick))
+            await asyncio.sleep(self._compute_sleep_interval(transition.state, idle_tick))
 
     async def _drain_inputs(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

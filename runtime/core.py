@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, field
 from typing import Any
 
 from subjective_runtime_v2_1.action.context import ExecutionContext
@@ -27,6 +27,7 @@ from subjective_runtime_v2_1.modules.rehearsal import RehearsalModule
 from subjective_runtime_v2_1.modules.self_check import SelfCheckModule
 from subjective_runtime_v2_1.planning.planner import Planner
 from subjective_runtime_v2_1.planning.scoring import score_action
+from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
 from subjective_runtime_v2_1.state.models import AgentStateV2_1, Candidate, RawObservation, Tension
 from subjective_runtime_v2_1.state.store import InMemoryStateStore
 from subjective_runtime_v2_1.tension.engine import TensionEngine
@@ -37,20 +38,8 @@ from subjective_runtime_v2_1.workspace.workspace import Workspace
 
 WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
 
-
-@dataclass
-class CycleResult:
-    """Pure output of a single cognitive cycle.
-
-    RuntimeCore produces this object.  The supervisor (or test harness) is
-    responsible for persisting ``new_state`` and ``events`` atomically via
-    ``SQLiteRunStore.apply_cycle_transition``.
-    """
-    new_state: AgentStateV2_1
-    events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
-    tool_records: list[dict[str, Any]] = field(default_factory=list)
-    approval_requests: list[dict[str, Any]] = field(default_factory=list)
-    cycle_summary: dict[str, Any] = field(default_factory=dict)
+# Backward-compat alias so existing imports of CycleResult continue to work.
+CycleResult = CycleTransition
 
 
 class RuntimeCore:
@@ -94,8 +83,8 @@ class RuntimeCore:
     # Public API
     # ------------------------------------------------------------------
 
-    def cycle(self, run_id: str, inputs: dict, idle_tick: bool = False) -> CycleResult:
-        """Run one cognitive cycle and return a CycleResult.
+    def cycle(self, run_id: str, inputs: dict, idle_tick: bool = False) -> CycleTransition:
+        """Run one cognitive cycle and return a CycleTransition.
 
         RuntimeCore does NOT persist the resulting state; that is the caller's
         responsibility.  The only exception is the internal InMemoryStateStore
@@ -197,6 +186,7 @@ class RuntimeCore:
         # ---- planning and execution ----
         new_approval: dict[str, Any] | None = None
         tool_record: dict[str, Any] | None = None
+        chosen = None
 
         state.pending_options = self.planner.propose(state)
         if state.pending_options:
@@ -217,6 +207,8 @@ class RuntimeCore:
                     self_model=state.self_model,
                     world_model=state.world_model,
                     regulation=state.regulation,
+                    working_memory=list(state.working_memory),
+                    goal_stack=list(state.goal_stack),
                 )
                 outcome = self.executor.execute(chosen, ctx)
                 state.last_outcome = outcome
@@ -257,16 +249,20 @@ class RuntimeCore:
         # ---- persist to internal buffer (for unit-test compat) ----
         self.state_store.save(run_id, state)
 
-        # ---- build CycleResult ----
-        events = self._build_cycle_events(state, idle_tick, tool_record, new_approval)
+        # ---- build CycleTransition ----
+        event_drafts = self._build_cycle_events(state, idle_tick, tool_record, new_approval)
         tool_records = [tool_record] if tool_record else []
         approval_requests = [new_approval] if new_approval else []
 
-        return CycleResult(
-            new_state=state,
-            events=events,
+        return CycleTransition(
+            run_id=run_id,
+            cycle_id=state.cycle_id,
+            state=state,
+            events=event_drafts,
+            chosen_action=chosen if tool_record is not None else None,
+            approval_request=new_approval,
+            status_override=None,
             tool_records=tool_records,
-            approval_requests=approval_requests,
             cycle_summary={
                 "cycle_id": state.cycle_id,
                 "idle_tick": idle_tick,
@@ -313,6 +309,18 @@ class RuntimeCore:
                 "kind": "focus_summary",
                 "cycle_id": cycle_id,
                 "focus_kinds": [c.kind for c in state.active_focus[:3]],
+            })
+
+        # Always promote a compact episodic recall from recent memory — provides
+        # a second kind even when there are no tensions or tool outcomes, so
+        # AssociativeModule has real cross-kind input.
+        recent_episodic = memories.get("episodic", [])
+        if recent_episodic:
+            wm.append({
+                "kind": "episodic_recall",
+                "cycle_id": cycle_id,
+                "episode_cycle_id": recent_episodic[-1].get("cycle_id"),
+                "tensions": recent_episodic[-1].get("tensions", []),
             })
 
         if state.last_outcome and state.last_outcome.get("status") == "ok":
@@ -366,21 +374,21 @@ class RuntimeCore:
         idle_tick: bool,
         tool_record: dict | None,
         new_approval: dict | None,
-    ) -> list[tuple[str, dict]]:
-        """Collect all cycle-scoped events as (event_type, payload) pairs."""
-        events: list[tuple[str, dict]] = []
+    ) -> list[RuntimeEventDraft]:
+        """Collect all cycle-scoped events as RuntimeEventDraft objects."""
+        events: list[RuntimeEventDraft] = []
 
         if state.last_action is not None:
-            events.append((
-                "tool_call_proposed",
-                {"cycle_id": state.cycle_id, "last_action": state.last_action},
+            events.append(RuntimeEventDraft(
+                type="tool_call_proposed",
+                payload={"cycle_id": state.cycle_id, "last_action": state.last_action},
             ))
 
         if tool_record is not None:
             event_type = "tool_call_executed" if tool_record.get("status") == "ok" else "tool_call_failed"
-            events.append((
-                event_type,
-                {
+            events.append(RuntimeEventDraft(
+                type=event_type,
+                payload={
                     "cycle_id": state.cycle_id,
                     "last_action": state.last_action,
                     "last_outcome": state.last_outcome,
@@ -388,11 +396,14 @@ class RuntimeCore:
             ))
 
         if new_approval is not None:
-            events.append(("approval_requested", dict(new_approval)))
+            events.append(RuntimeEventDraft(
+                type="approval_requested",
+                payload=dict(new_approval),
+            ))
 
-        events.append((
-            "cycle_completed",
-            {
+        events.append(RuntimeEventDraft(
+            type="cycle_completed",
+            payload={
                 "cycle_id": state.cycle_id,
                 "idle_tick": idle_tick,
                 "focus": [c.kind for c in state.active_focus],
@@ -401,9 +412,9 @@ class RuntimeCore:
                 "last_outcome": state.last_outcome,
             },
         ))
-        events.append((
-            "state_updated",
-            {
+        events.append(RuntimeEventDraft(
+            type="state_updated",
+            payload={
                 "cycle_id": state.cycle_id,
                 "regulation": state.regulation,
                 "continuity_summary": state.continuity_field.summary,

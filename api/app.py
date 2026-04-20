@@ -50,7 +50,7 @@ def create_app(db_path: str = 'runtime.db') -> FastAPI:
         )
 
     scheduler = RuntimeScheduler(runtime_factory=runtime_factory, events=events, db=db)
-    app = FastAPI(title='subjective_runtime_v2_1')
+    app = FastAPI(title='subjective_runtime_v2_1 phase3')
     app.include_router(build_router(runtime_factory, scheduler, db, events))
 
     @app.on_event('startup')
