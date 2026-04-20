@@ -3,13 +3,14 @@ from __future__ import annotations
 from subjective_runtime_v2_1.state.models import AgentStateV2_1, ActionOption
 from subjective_runtime_v2_1.util.ids import new_id
 
-_DEFAULT_CAPABILITIES = {
+_DEFAULT_CAPABILITIES: dict[str, bool] = {
     "echo": True,
     "memory_write": True,
     "file_read": True,
     "file_write": True,
     "http_get": False,
 }
+# Treat as read-only; do not mutate this dict at runtime.
 
 
 class Planner:

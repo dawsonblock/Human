@@ -6,13 +6,11 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
 from subjective_runtime_v2_1.state.models import AgentStateV2_1
 from subjective_runtime_v2_1.state.store import state_from_dict, state_to_dict
-
-if TYPE_CHECKING:
-    from subjective_runtime_v2_1.runtime.transition import CycleTransition
 
 
 @dataclass(slots=True)
@@ -177,7 +175,6 @@ class SQLiteRunStore:
         timestamps) so callers can fan them out to live subscribers.
         """
         # --- resolve arguments ---
-        from subjective_runtime_v2_1.runtime.transition import CycleTransition  # local import avoids circular dep
         if isinstance(transition_or_run_id, CycleTransition):
             transition = transition_or_run_id
             run_id = transition.run_id

@@ -16,9 +16,10 @@ from subjective_runtime_v2_1.state.store import InMemoryStateStore
 class StateSeeder:
     """Loads initial state from SQLite to seed RuntimeCore's in-memory buffer.
 
-    The ``save()`` method is intentionally a no-op: RuntimeCore's internal
-    InMemoryStateStore is the cycle-to-cycle buffer, and the supervisor uses
-    ``apply_cycle_transition`` for atomic state+events commits to SQLite.
+    ``save()`` raises ``NotImplementedError`` to make it obvious that
+    RuntimeCore must not directly persist state.  The supervisor is the sole
+    authority for committing state+events via
+    ``SQLiteRunStore.apply_cycle_transition()``.
     """
     def __init__(self, db: SQLiteRunStore) -> None:
         self.db = db
@@ -31,8 +32,10 @@ class StateSeeder:
         return state
 
     def save(self, run_id: str, state) -> None:
-        # Intentionally a no-op: supervisor owns persistence via apply_cycle_transition.
-        pass
+        raise NotImplementedError(
+            "StateSeeder.save() must not be called directly. "
+            "Use SQLiteRunStore.apply_cycle_transition() to persist state atomically."
+        )
 
 
 def create_app(db_path: str = 'runtime.db') -> FastAPI:

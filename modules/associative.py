@@ -5,6 +5,17 @@ from subjective_runtime_v2_1.state.models import AgentStateV2_1, Candidate, Inte
 from subjective_runtime_v2_1.util.ids import new_id
 
 
+def _recency_score(item_a: dict, item_b: dict) -> float:
+    """Score based on the minimum cycle_id of two items relative to their maximum.
+
+    Returns a value in [0.5, 1.0]: higher when both items are from recent cycles.
+    """
+    cid_a = item_a.get("cycle_id", 0)
+    cid_b = item_b.get("cycle_id", 0)
+    max_cid = max(cid_a, cid_b, 1)
+    return 0.5 + 0.5 * min(cid_a, cid_b) / max_cid
+
+
 class AssociativeModule(Module):
     name = "associative"
 
@@ -31,10 +42,6 @@ class AssociativeModule(Module):
         kind_a, kind_b = kinds[0], kinds[1]
         item_a, item_b = seen_kinds[kind_a], seen_kinds[kind_b]
 
-        recency_a = item_a.get("cycle_id", 0)
-        recency_b = item_b.get("cycle_id", 0)
-        recency_score = 0.5 + 0.5 * min(recency_a, recency_b) / max(max(recency_a, recency_b), 1)
-
         return [Candidate(
             id=new_id("cand"),
             source=self.name,
@@ -48,7 +55,7 @@ class AssociativeModule(Module):
             goal_relevance=0.25,
             uncertainty_reduction=0.05,
             novelty=0.7,
-            recency=recency_score,
+            recency=_recency_score(item_a, item_b),
             valuation_alignment=0.1,
             continuity_match=0.2,
             conflict_pressure=0.0,

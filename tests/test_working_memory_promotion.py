@@ -59,7 +59,7 @@ def test_working_memory_mixed_kinds_after_multi_cycle():
     assert len(kinds) >= 2, f"Expected mixed kinds in working_memory, got: {kinds}"
 
 
-def test_associative_module_gets_real_input(tmp_path):
+def test_associative_module_gets_real_input():
     """After enough cycles in EXPLORE mode, AssociativeModule should fire."""
     from subjective_runtime_v2_1.state.models import AgentStateV2_1
     from subjective_runtime_v2_1.modules.associative import AssociativeModule
