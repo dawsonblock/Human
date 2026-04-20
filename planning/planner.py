@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Final
+
 from subjective_runtime_v2_1.state.models import AgentStateV2_1, ActionOption
 from subjective_runtime_v2_1.util.ids import new_id
 
-_DEFAULT_CAPABILITIES: dict[str, bool] = {
+_DEFAULT_CAPABILITIES: Final[dict[str, bool]] = {
     "echo": True,
     "memory_write": True,
     "file_read": True,

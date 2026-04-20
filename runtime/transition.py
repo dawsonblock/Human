@@ -20,7 +20,7 @@ class RuntimeEventDraft:
     payload: dict[str, Any]
 
 
-@dataclass
+@dataclass(slots=True)
 class CycleTransition:
     """Pure output of one cognitive cycle.
 

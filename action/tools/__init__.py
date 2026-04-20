@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 
 
-def build_tool_registry(allowed_roots: list[str], memory_sink: list[dict] | None = None):
+def build_tool_registry(allowed_roots: list[str], *, memory_sink: list[dict] | None = None):
     """Build and return the default tool registry.
 
     ``memory_sink`` is deprecated and ignored; memory writes now produce state

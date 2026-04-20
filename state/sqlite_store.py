@@ -184,8 +184,6 @@ class SQLiteRunStore:
         else:
             run_id = transition_or_run_id
             state = new_state
-            # Handle both (event_type, payload) tuples and RuntimeEventDraft objects
-            from subjective_runtime_v2_1.runtime.transition import RuntimeEventDraft  # noqa: F401
             raw = list(cycle_events) if cycle_events else []
             events_to_commit = [
                 (e.type, e.payload) if isinstance(e, RuntimeEventDraft) else (e[0], e[1])
