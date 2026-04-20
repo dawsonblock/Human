@@ -35,7 +35,7 @@ from subjective_runtime_v2_1.util.time import now_ts
 from subjective_runtime_v2_1.workspace.attention import AttentionGate
 from subjective_runtime_v2_1.workspace.workspace import Workspace
 
-_WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
+WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
 
 
 @dataclass
@@ -289,7 +289,7 @@ class RuntimeCore:
             record = {"kind": kind, "payload": payload, "cycle_id": cycle_id}
             if kind == "working_note":
                 state.working_memory.append(record)
-                state.working_memory = state.working_memory[-_WORKING_MEMORY_CAP:]
+                state.working_memory = state.working_memory[-WORKING_MEMORY_CAP:]
             elif kind == "episode":
                 state.episodic_trace.append(record)
             elif kind == "self_history":
@@ -358,7 +358,7 @@ class RuntimeCore:
                     "tool_name": latest.get("tool_name"),
                 })
 
-        state.working_memory = wm[-_WORKING_MEMORY_CAP:]
+        state.working_memory = wm[-WORKING_MEMORY_CAP:]
 
     def _build_cycle_events(
         self,

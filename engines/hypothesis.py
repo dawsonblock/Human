@@ -3,9 +3,6 @@ from __future__ import annotations
 from subjective_runtime_v2_1.state.models import AgentStateV2_1
 
 
-_HYPOTHESIS_KINDS = ("sensor_error", "world_changed", "bad_model")
-
-
 class HypothesisEngine:
     """Generate hypotheses to explain active tensions."""
 
