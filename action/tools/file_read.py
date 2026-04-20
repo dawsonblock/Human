@@ -24,6 +24,6 @@ class FileReadTool(Tool):
 
     def invoke(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
         path = Path(call.arguments["path"]).resolve()
-        if not any(str(path).startswith(str(root)) for root in self.allowed_roots):
+        if not any(path.is_relative_to(root) for root in self.allowed_roots):
             return ToolResult(ok=False, output={}, error="path outside allowed roots")
         return ToolResult(ok=True, output={"path": str(path), "text": path.read_text(encoding="utf-8")})
