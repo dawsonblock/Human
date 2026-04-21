@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, field
+from dataclasses import asdict
 from typing import Any
 
 from subjective_runtime_v2_1.action.context import ExecutionContext
@@ -279,17 +279,14 @@ class RuntimeCore:
     def _apply_tool_mutations(self, state: AgentStateV2_1, outcome: dict) -> None:
         """Apply memory_writes and state_delta from tool execution to state."""
         for entry in outcome.get("memory_writes") or []:
-            kind = entry.get("kind")
-            payload = entry.get("payload", {})
-            cycle_id = entry.get("cycle_id", state.cycle_id)
-            record = {"kind": kind, "payload": payload, "cycle_id": cycle_id}
-            if kind == "working_note":
-                state.working_memory.append(record)
-                state.working_memory = state.working_memory[-WORKING_MEMORY_CAP:]
-            elif kind == "episode":
-                state.episodic_trace.append(record)
-            elif kind == "self_history":
-                state.self_history.append(record)
+            # Ensure cycle_id is stamped on every entry before routing.
+            if "cycle_id" not in entry:
+                entry = dict(entry, cycle_id=state.cycle_id)
+            self.memory.apply_memory_write(state, entry)
+
+        # Trim working_memory to its cap after all writes.
+        if len(state.working_memory) > WORKING_MEMORY_CAP:
+            state.working_memory = state.working_memory[-WORKING_MEMORY_CAP:]
 
         delta = outcome.get("state_delta") or {}
         if "regulation" in delta and isinstance(delta["regulation"], dict):

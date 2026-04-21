@@ -16,6 +16,7 @@ from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager, LiveEventBus
 from subjective_runtime_v2_1.runtime.supervisor import RunConfig, RunSupervisor
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.state.store import InMemoryStateStore
 
 
 def _make_supervisor(db, run_id: str):
@@ -23,18 +24,9 @@ def _make_supervisor(db, run_id: str):
     registry = build_tool_registry(allowed_roots=["."])
     db.create_run(run_id, config={}, status="running")
 
-    class StateSeeder:
-        def load(self, r):
-            state = db.load_state(r)
-            if state is None:
-                db.create_run(r, config={}, status="running")
-                state = db.load_state(r)
-            return state
-
-        def save(self, r, state):
-            db.save_state(r, state)
-
-    runtime = RuntimeCore(StateSeeder(), ActionGate(registry), Executor(registry))
+    # InMemoryStateStore is the cycle-to-cycle buffer; supervisor seeds it
+    # from SQLite on start() and commits atomically via apply_cycle_transition.
+    runtime = RuntimeCore(InMemoryStateStore(), ActionGate(registry), Executor(registry))
     supervisor = RunSupervisor(
         run_id=run_id,
         runtime=runtime,

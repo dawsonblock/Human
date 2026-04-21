@@ -27,17 +27,9 @@ def _make_supervisor(db_path, run_id="approval_test"):
     reg = build_tool_registry(allowed_roots=["."])
     db.create_run(run_id, config={}, status="running")
 
-    class StateSeeder:
-        def load(self, r):
-            state = db.load_state(r)
-            if state is None:
-                db.create_run(r, config={}, status="running")
-                state = db.load_state(r)
-            return state
-        def save(self, r, state):
-            db.save_state(r, state)
-
-    rt = RuntimeCore(StateSeeder(), ActionGate(reg), Executor(reg))
+    # InMemoryStateStore is the cycle-to-cycle buffer; supervisor seeds it
+    # from SQLite on start() and commits atomically via apply_cycle_transition.
+    rt = RuntimeCore(InMemoryStateStore(), ActionGate(reg), Executor(reg))
     sv = RunSupervisor(
         run_id=run_id, runtime=rt, events=em,
         config=RunConfig(tick_interval_sec=0.05),

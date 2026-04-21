@@ -31,19 +31,10 @@ def _make_scheduler(db_path):
     em = EventManager(db, LiveEventBus())
     reg = build_tool_registry(allowed_roots=["."])
 
-    class StateSeeder:
-        def load(self, run_id):
-            state = db.load_state(run_id)
-            if state is None:
-                db.create_run(run_id, config={}, status="running")
-                state = db.load_state(run_id)
-            return state
-
-        def save(self, run_id, state):
-            db.save_state(run_id, state)
-
     def rf():
-        return RuntimeCore(StateSeeder(), ActionGate(reg), Executor(reg))
+        # InMemoryStateStore is the cycle-to-cycle buffer; supervisor seeds it
+        # from SQLite on start() and commits atomically via apply_cycle_transition.
+        return RuntimeCore(InMemoryStateStore(), ActionGate(reg), Executor(reg))
 
     return RuntimeScheduler(rf, em, db), db, em
 
