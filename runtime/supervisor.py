@@ -47,6 +47,11 @@ class RunSupervisor:
     def is_paused(self) -> bool:
         return self._paused and not self._stopped
 
+    @property
+    def has_active_task(self) -> bool:
+        """True if the loop task exists and has not yet completed."""
+        return self._task is not None and not self._task.done()
+
     async def start(self, initial_inputs: dict[str, Any] | None = None) -> None:
         if initial_inputs:
             await self._input_queue.put(initial_inputs)

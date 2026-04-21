@@ -57,8 +57,7 @@ async def _exercise(db_path):
     assert recovered.is_paused, "recovered run must be paused"
 
     # The loop task must exist (created during recovery) even though it is paused.
-    assert recovered._task is not None, "loop task must be created on recovery"
-    assert not recovered._task.done(), "loop task must be alive"
+    assert recovered.has_active_task, "loop task must be created on recovery"
 
     # Cycle counter must NOT advance while paused.
     await asyncio.sleep(0.15)

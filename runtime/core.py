@@ -38,6 +38,13 @@ from subjective_runtime_v2_1.workspace.workspace import Workspace
 
 WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
 
+# Defaults used when reconstructing an ActionOption from a stored approval request.
+# These scores do not affect gate logic (the gate is bypassed for approved actions);
+# they exist only to satisfy the ActionOption dataclass.
+_APPROVAL_EXEC_EXPECTED_VALUE: float = 0.9
+_APPROVAL_EXEC_ESTIMATED_COST: float = 0.0
+_APPROVAL_EXEC_ESTIMATED_RISK: float = 0.0
+
 # Backward-compat alias so existing imports of CycleResult continue to work.
 CycleResult = CycleTransition
 
@@ -200,9 +207,9 @@ class RuntimeCore:
                         target={"tool_name": req["tool_name"], "arguments": req.get("arguments", {})},
                         predicted_world_effect={},
                         predicted_self_effect={},
-                        expected_value=0.9,
-                        estimated_cost=0.0,
-                        estimated_risk=0.0,
+                        expected_value=_APPROVAL_EXEC_EXPECTED_VALUE,
+                        estimated_cost=_APPROVAL_EXEC_ESTIMATED_COST,
+                        estimated_risk=_APPROVAL_EXEC_ESTIMATED_RISK,
                     )
                     state.last_action = {"id": chosen.id, "name": chosen.name, "gate_reason": "approval_granted"}
                     ctx = ExecutionContext(
