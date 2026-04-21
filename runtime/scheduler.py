@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 
 from subjective_runtime_v2_1.runtime.events import EventManager
@@ -53,4 +54,12 @@ class RuntimeScheduler:
             if meta.status == 'running':
                 await supervisor.start()
             elif meta.status == 'paused':
+                # Seed the runtime's in-memory store from SQLite so the first
+                # cycle after resume sees the correct prior state.
+                state = self.db.load_state(meta.run_id)
+                if state is not None:
+                    supervisor.runtime.state_store.save(meta.run_id, state)
+                # Start the loop task in paused state so that calling resume()
+                # is sufficient to restart execution without any extra wiring.
                 supervisor._paused = True
+                supervisor._task = asyncio.create_task(supervisor._run_loop())

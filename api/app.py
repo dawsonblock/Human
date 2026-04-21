@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from subjective_runtime_v2_1.action.executor import Executor
@@ -53,12 +55,14 @@ def create_app(db_path: str = 'runtime.db') -> FastAPI:
         )
 
     scheduler = RuntimeScheduler(runtime_factory=runtime_factory, events=events, db=db)
-    app = FastAPI(title='subjective_runtime_v2_1 phase3')
-    app.include_router(build_router(runtime_factory, scheduler, db, events))
 
-    @app.on_event('startup')
-    async def _startup_recover() -> None:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         await scheduler.recover_runs()
+        yield
+
+    app = FastAPI(title='subjective_runtime_v2_1 phase3', lifespan=lifespan)
+    app.include_router(build_router(runtime_factory, scheduler, db, events))
 
     app.state.scheduler = scheduler
     app.state.db = db

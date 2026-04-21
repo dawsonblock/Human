@@ -1,6 +1,9 @@
 # subjective_runtime_v2_1
 
-A credible runtime testbed for integrated, temporally extended, self-affecting cognition — Phase 3.
+A bounded cognitive runtime scaffold — Phase 3.
+
+An event-sourced supervisor loop for temporally extended, self-affecting cognition.
+**Not a full autonomous agent platform.** See [What it is not](#what-it-is-not) below.
 
 ## What is in here
 
@@ -8,16 +11,17 @@ A credible runtime testbed for integrated, temporally extended, self-affecting c
 - Append-only durable event log with live SSE fan-out
 - `RuntimeCore.cycle()` returns a pure `CycleResult`; persistence is the supervisor's responsibility
 - Run supervisors with pause/resume/stop, idle ticks, and `_cycle_lock` as the single execution authority
-- Scheduler that recovers running or paused runs from persistence on startup
+- Scheduler that recovers running or paused runs from persistence on startup; resumed paused runs continue cycling correctly
 - `memory_write` tool routes writes by kind into durable state (`working_memory`, `episodic_trace`, `self_history`)
 - Homeostatic regulation, explore/exploit mode switching, hypothesis generation, bounded associative synthesis, idle-time consolidation
 - Working-memory promotion: every cycle leaves a compact "what mattered" packet
-- Approval flow: `POST /runs/{run_id}/approve` and `POST /runs/{run_id}/deny`
+- Approval flow: `POST /runs/{run_id}/approve` and `POST /runs/{run_id}/deny` — approved actions are executed exactly once
 
 ## What it is not
 
+- not a full autonomous agent platform
+- not production-ready
 - not a finished cognition runtime
-- not production-grade
 - not a claim of consciousness or sentience
 - not a final persistence/event schema
 
@@ -30,6 +34,13 @@ pip install -e ".[dev]"
 pytest
 uvicorn subjective_runtime_v2_1.api.app:app --reload
 ```
+
+The package source lives at the repository root (all top-level directories such
+as `action/`, `runtime/`, `state/`, etc. are sub-packages of
+`subjective_runtime_v2_1`).  `src/subjective_runtime_v2_1` is a relative
+symlink to `..` so that setuptools can locate the package under `src/` using
+the standard `package-dir = {"": "src"}` layout without any absolute-path or
+`PYTHONPATH` hacks.
 
 ## API endpoints
 
