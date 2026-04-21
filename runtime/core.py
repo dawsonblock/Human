@@ -28,7 +28,7 @@ from subjective_runtime_v2_1.modules.self_check import SelfCheckModule
 from subjective_runtime_v2_1.planning.planner import Planner
 from subjective_runtime_v2_1.planning.scoring import score_action
 from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
-from subjective_runtime_v2_1.state.models import AgentStateV2_1, Candidate, RawObservation, Tension
+from subjective_runtime_v2_1.state.models import AgentStateV2_1, ActionOption, Candidate, RawObservation, Tension
 from subjective_runtime_v2_1.state.store import InMemoryStateStore
 from subjective_runtime_v2_1.tension.engine import TensionEngine
 from subjective_runtime_v2_1.util.ids import new_id
@@ -37,6 +37,13 @@ from subjective_runtime_v2_1.workspace.attention import AttentionGate
 from subjective_runtime_v2_1.workspace.workspace import Workspace
 
 WORKING_MEMORY_CAP = 12  # max items; older entries are evicted to keep the buffer compact
+
+# Defaults used when reconstructing an ActionOption from a stored approval request.
+# These scores do not affect gate logic (the gate is bypassed for approved actions);
+# they exist only to satisfy the ActionOption dataclass.
+_APPROVAL_EXEC_EXPECTED_VALUE: float = 0.9
+_APPROVAL_EXEC_ESTIMATED_COST: float = 0.0
+_APPROVAL_EXEC_ESTIMATED_RISK: float = 0.0
 
 # Backward-compat alias so existing imports of CycleResult continue to work.
 CycleResult = CycleTransition
@@ -188,46 +195,87 @@ class RuntimeCore:
         tool_record: dict[str, Any] | None = None
         chosen = None
 
-        state.pending_options = self.planner.propose(state)
-        if state.pending_options:
-            ranked = sorted(
-                state.pending_options,
-                key=lambda a: score_action(a, self.config, state),
-                reverse=True,
-            )
-            chosen = ranked[0]
-            approved, reason = self.gate.approve(state, chosen, idle_tick=idle_tick)
-            state.last_action = {"id": chosen.id, "name": chosen.name, "gate_reason": reason}
-            if approved:
-                ctx = ExecutionContext(
-                    run_id=run_id,
-                    cycle_id=state.cycle_id,
-                    idle_tick=idle_tick,
-                    policies={},
-                    self_model=state.self_model,
-                    world_model=state.world_model,
-                    regulation=state.regulation,
-                    working_memory=list(state.working_memory),
-                    goal_stack=list(state.goal_stack),
+        approval_id = inputs.get("_approval_granted") if inputs else None
+        matched_approved = False
+        if approval_id:
+            # Execute a previously approved action exactly once.
+            # The request status transitions: pending → approved (by supervisor) → executed (here).
+            for req in state.approval_requests:
+                if req.get("action_id") == approval_id and req.get("status") == "approved":
+                    matched_approved = True
+                    chosen = ActionOption(
+                        id=req["action_id"],
+                        name=req.get("reason", req.get("tool_name", "approved_action")),
+                        target={"tool_name": req["tool_name"], "arguments": req.get("arguments", {})},
+                        predicted_world_effect={},
+                        predicted_self_effect={},
+                        expected_value=_APPROVAL_EXEC_EXPECTED_VALUE,
+                        estimated_cost=_APPROVAL_EXEC_ESTIMATED_COST,
+                        estimated_risk=_APPROVAL_EXEC_ESTIMATED_RISK,
+                    )
+                    state.last_action = {"id": chosen.id, "name": chosen.name, "gate_reason": "approval_granted"}
+                    ctx = ExecutionContext(
+                        run_id=run_id,
+                        cycle_id=state.cycle_id,
+                        idle_tick=idle_tick,
+                        policies={},
+                        self_model=state.self_model,
+                        world_model=state.world_model,
+                        regulation=state.regulation,
+                        working_memory=list(state.working_memory),
+                        goal_stack=list(state.goal_stack),
+                    )
+                    outcome = self.executor.execute(chosen, ctx)
+                    state.last_outcome = outcome
+                    tool_record = dict(outcome)
+                    self._apply_tool_mutations(state, outcome)
+                    # Mark as executed so duplicate approval signals are no-ops.
+                    req["status"] = "executed"
+                    break
+
+        if not matched_approved:
+            # No live approved request matched (stale/duplicate signal or no signal):
+            # run the normal planning path so cycles are not stalled.
+            state.pending_options = self.planner.propose(state)
+            if state.pending_options:
+                ranked = sorted(
+                    state.pending_options,
+                    key=lambda a: score_action(a, self.config, state),
+                    reverse=True,
                 )
-                outcome = self.executor.execute(chosen, ctx)
-                state.last_outcome = outcome
-                tool_record = dict(outcome)
-                self._apply_tool_mutations(state, outcome)
-            elif reason == "approval_required":
-                req = {
-                    "action_id": chosen.id,
-                    "tool_name": chosen.target.get("tool_name"),
-                    "arguments": chosen.target.get("arguments", {}),
-                    "reason": chosen.name,
-                    "created_at": state.timestamp,
-                    "status": "pending",
-                }
-                state.approval_requests.append(req)
-                new_approval = req
-                state.last_outcome = {"status": "blocked", "reason": reason}
-            else:
-                state.last_outcome = {"status": "blocked", "reason": reason}
+                chosen = ranked[0]
+                approved, reason = self.gate.approve(state, chosen, idle_tick=idle_tick)
+                state.last_action = {"id": chosen.id, "name": chosen.name, "gate_reason": reason}
+                if approved:
+                    ctx = ExecutionContext(
+                        run_id=run_id,
+                        cycle_id=state.cycle_id,
+                        idle_tick=idle_tick,
+                        policies={},
+                        self_model=state.self_model,
+                        world_model=state.world_model,
+                        regulation=state.regulation,
+                        working_memory=list(state.working_memory),
+                        goal_stack=list(state.goal_stack),
+                    )
+                    outcome = self.executor.execute(chosen, ctx)
+                    state.last_outcome = outcome
+                    tool_record = dict(outcome)
+                    self._apply_tool_mutations(state, outcome)
+                elif reason == "approval_required":
+                    req = {
+                        "action_id": chosen.id,
+                        "tool_name": chosen.target.get("tool_name"),
+                        "arguments": chosen.target.get("arguments", {}),
+                        "reason": chosen.name,
+                        "created_at": state.timestamp,
+                        "status": "pending",
+                    }
+                    state.approval_requests.append(req)
+                    new_approval = req
+                    state.last_outcome = {"status": "blocked", "reason": reason}
+                else:
+                    state.last_outcome = {"status": "blocked", "reason": reason}
 
         # ---- consolidation (idle ticks only) ----
         if idle_tick:

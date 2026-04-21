@@ -53,4 +53,4 @@ class RuntimeScheduler:
             if meta.status == 'running':
                 await supervisor.start()
             elif meta.status == 'paused':
-                supervisor._paused = True
+                await supervisor.recover_paused()

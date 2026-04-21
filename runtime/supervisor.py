@@ -47,6 +47,11 @@ class RunSupervisor:
     def is_paused(self) -> bool:
         return self._paused and not self._stopped
 
+    @property
+    def has_active_task(self) -> bool:
+        """True if the loop task exists and has not yet completed."""
+        return self._task is not None and not self._task.done()
+
     async def start(self, initial_inputs: dict[str, Any] | None = None) -> None:
         if initial_inputs:
             await self._input_queue.put(initial_inputs)
@@ -90,6 +95,21 @@ class RunSupervisor:
         if state is not None:
             self.run_store.save_state(self.run_id, state, status='running')
         await self.events.publish(self.run_id, 'run_resumed', {})
+
+    async def recover_paused(self) -> None:
+        """Restore a paused run recovered from persistence.
+
+        Seeds the runtime's in-memory buffer from SQLite and starts the loop
+        task in a paused state so that a subsequent call to ``resume()`` is
+        sufficient to restart execution.  Callers must not mutate ``_paused``
+        or ``_task`` directly.
+        """
+        state = self.run_store.load_state(self.run_id)
+        if state is not None:
+            self.runtime.state_store.save(self.run_id, state)
+        self._paused = True
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run_loop())
 
     async def inject_input(self, inputs: dict[str, Any]) -> None:
         await self._input_queue.put(inputs)
