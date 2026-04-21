@@ -97,6 +97,55 @@ class InterpretiveBias:
 
 
 @dataclass(slots=True)
+class PlanStep:
+    id: str
+    description: str
+    tool_name: str
+    arguments: dict[str, Any]
+    status: str = "pending"  # pending/running/completed/failed/skipped
+    started_at: float | None = None
+    completed_at: float | None = None
+    error: str | None = None
+    output: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class Plan:
+    id: str
+    goal_id: str
+    steps: list[PlanStep]
+    assumptions: list[str] = field(default_factory=list)
+    stop_conditions: list[str] = field(default_factory=list)
+    current_step: int = 0
+    status: str = "active"  # active/completed/failed/blocked/cancelled
+    created_at: float = 0.0
+    replans: int = 0
+
+
+@dataclass(slots=True)
+class Goal:
+    id: str
+    type: str
+    description: str
+    priority: float = 0.5
+    success_criteria: str = ""
+    status: str = "active"  # active/completed/failed/abandoned
+    created_at: float = 0.0
+
+
+@dataclass(slots=True)
+class Artifact:
+    id: str
+    run_id: str
+    type: str  # summary/extracted_facts/draft_note/file_write_preview/tool_output/final_report
+    title: str
+    content: dict[str, Any]
+    provenance: dict[str, Any] = field(default_factory=dict)
+    created_at: float = 0.0
+    step_id: str | None = None
+
+
+@dataclass(slots=True)
 class ActionOption:
     id: str
     name: str
@@ -190,3 +239,13 @@ class AgentStateV2_1:
 
     last_action: dict[str, Any] | None = None
     last_outcome: dict[str, Any] | None = None
+
+    # Stage 2: goal/plan/artifact/observability fields
+    active_goal: Goal | None = None
+    active_plan: Plan | None = None
+    artifacts: list[Artifact] = field(default_factory=list)
+    stop_reason: str | None = None  # completed/blocked/awaiting_approval/awaiting_input/error/cancelled
+    run_outcome: dict[str, Any] = field(default_factory=dict)
+    total_actions: int = 0
+    total_replans: int = 0
+    last_meaningful_action_ts: float | None = None

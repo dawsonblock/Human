@@ -18,16 +18,24 @@ def build_tool_registry(allowed_roots: list[str], *, memory_sink: list[dict] | N
             stacklevel=2,
         )
     from subjective_runtime_v2_1.action.registry import ToolRegistry
+    from subjective_runtime_v2_1.action.tools.append_note import AppendNoteTool
     from subjective_runtime_v2_1.action.tools.echo import EchoTool
     from subjective_runtime_v2_1.action.tools.file_read import FileReadTool
     from subjective_runtime_v2_1.action.tools.file_write import FileWriteTool
+    from subjective_runtime_v2_1.action.tools.list_directory import ListDirectoryTool
     from subjective_runtime_v2_1.action.tools.memory_write import MemoryWriteTool
+    from subjective_runtime_v2_1.action.tools.search_files import SearchFilesTool
+    from subjective_runtime_v2_1.action.tools.write_file_preview import WriteFilePreviewTool
 
     registry = ToolRegistry()
     registry.register(EchoTool())
     registry.register(MemoryWriteTool())
     registry.register(FileReadTool(allowed_roots=allowed_roots))
     registry.register(FileWriteTool(allowed_roots=allowed_roots))
+    registry.register(ListDirectoryTool(allowed_roots=allowed_roots))
+    registry.register(SearchFilesTool(allowed_roots=allowed_roots))
+    registry.register(AppendNoteTool(allowed_roots=allowed_roots))
+    registry.register(WriteFilePreviewTool(allowed_roots=allowed_roots))
     # http_get is not registered: the implementation is a non-functional stub.
     # Add a real bounded HTTP client here when that capability is needed.
     return registry

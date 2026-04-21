@@ -17,6 +17,9 @@ class RunConfig:
     idle_enabled: bool = True
     auto_sleep_when_stable: bool = True
     stability_threshold: float = 0.92
+    max_cycles: int = 0       # 0 = unlimited
+    max_actions: int = 0      # 0 = unlimited
+    max_replans: int = 3
 
 
 class RunSupervisor:
@@ -223,7 +226,14 @@ class RunSupervisor:
             idle_tick = len(pending_inputs) == 0
 
             async with self._cycle_lock:
-                transition = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
+                transition = self.runtime.cycle(
+                    self.run_id,
+                    merged_inputs,
+                    idle_tick=idle_tick,
+                    max_cycles=self.config.max_cycles,
+                    max_actions=self.config.max_actions,
+                    max_replans=self.config.max_replans,
+                )
                 # Atomically commit state + all cycle events to SQLite inside
                 # the same lock so no approve/deny can interleave between
                 # compute and commit.
@@ -241,6 +251,20 @@ class RunSupervisor:
                 )
                 for row in committed
             ])
+
+            # Stop the loop when the cycle reaches a terminal state
+            if transition.state.stop_reason in ("completed", "error", "cancelled"):
+                self._stopped = True
+                status = "completed" if transition.state.stop_reason == "completed" else "stopped"
+                state = self.run_store.load_state(self.run_id)
+                if state is not None:
+                    self.run_store.save_state(self.run_id, state, status=status)
+                await self.events.publish(self.run_id, 'run_finished', {
+                    'stop_reason': transition.state.stop_reason,
+                    'total_actions': transition.state.total_actions,
+                    'cycle_id': transition.cycle_id,
+                })
+                break
 
             await asyncio.sleep(self._compute_sleep_interval(transition.state, idle_tick))
 
