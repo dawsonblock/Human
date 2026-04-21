@@ -35,3 +35,7 @@ class ToolResult:
     output: dict[str, Any]
     error: str | None = None
     latency_ms: float | None = None
+    memory_writes: list[dict[str, Any]] = field(default_factory=list)
+    state_delta: dict[str, Any] = field(default_factory=dict)
+    observations: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)

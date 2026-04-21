@@ -58,6 +58,12 @@ class EventManager:
         return self._locks[run_id]
 
     async def publish(self, run_id: str, event_type: str, payload: dict[str, Any]) -> RuntimeEvent:
+        """Persist a single event and deliver it to live subscribers.
+
+        Used for lifecycle events (pause, resume, stop, input_enqueued) that
+        are not part of a cycle.  Cycle events should go through
+        ``SQLiteRunStore.apply_cycle_transition`` + ``fan_out`` instead.
+        """
         async with self._lock_for(run_id):
             seq = self.store.get_last_seq(run_id) + 1
             created_at = self.store.append_event(run_id, seq, event_type, payload)
@@ -70,3 +76,24 @@ class EventManager:
             )
         await self.live_bus.publish_live(event)
         return event
+
+    async def fan_out(self, committed_events: list[dict[str, Any]]) -> None:
+        """Push already-persisted events (from apply_cycle_transition) to live subscribers."""
+        for item in committed_events:
+            event = RuntimeEvent(
+                run_id=item['run_id'],
+                seq=item['seq'],
+                type=item['type'],
+                payload=item['payload'],
+                created_at=item['created_at'],
+            )
+            await self.live_bus.publish_live(event)
+
+    async def publish_persisted(self, event: RuntimeEvent) -> None:
+        """Deliver one already-persisted event to live subscribers."""
+        await self.live_bus.publish_live(event)
+
+    async def publish_persisted_batch(self, events: list[RuntimeEvent]) -> None:
+        """Deliver a batch of already-persisted events to live subscribers."""
+        for event in events:
+            await self.live_bus.publish_live(event)

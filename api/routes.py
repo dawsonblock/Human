@@ -7,7 +7,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from subjective_runtime_v2_1.api.schemas import InputRequest, RunCreateRequest
+from subjective_runtime_v2_1.api.schemas import ApprovalDecision, InputRequest, RunCreateRequest
 from subjective_runtime_v2_1.runtime.events import RuntimeEvent
 from subjective_runtime_v2_1.runtime.supervisor import RunConfig
 
@@ -99,11 +99,24 @@ def build_router(runtime_factory, scheduler, db, events):
 
         return StreamingResponse(event_generator(), media_type='text/event-stream')
 
-    @router.post('/runs/{run_id}/cycle')
-    async def manual_cycle(run_id: str, req: InputRequest):
-        runtime = runtime_factory()
-        state = runtime.cycle(run_id, req.inputs, idle_tick=False)
-        db.save_state(run_id, state)
-        return asdict(state)
+    @router.post('/runs/{run_id}/approve')
+    async def approve_action(run_id: str, req: ApprovalDecision):
+        supervisor = scheduler.get(run_id)
+        if supervisor is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        ok = await supervisor.approve_action(req.action_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail='pending approval request not found')
+        return {'run_id': run_id, 'action_id': req.action_id, 'status': 'approved'}
+
+    @router.post('/runs/{run_id}/deny')
+    async def deny_action(run_id: str, req: ApprovalDecision):
+        supervisor = scheduler.get(run_id)
+        if supervisor is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        ok = await supervisor.deny_action(req.action_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail='pending approval request not found')
+        return {'run_id': run_id, 'action_id': req.action_id, 'status': 'denied'}
 
     return router

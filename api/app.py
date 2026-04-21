@@ -10,9 +10,17 @@ from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager, LiveEventBus
 from subjective_runtime_v2_1.runtime.scheduler import RuntimeScheduler
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.state.store import InMemoryStateStore
 
 
-class DBAdapter:
+class StateSeeder:
+    """Loads initial state from SQLite to seed RuntimeCore's in-memory buffer.
+
+    ``save()`` raises ``NotImplementedError`` to make it obvious that
+    RuntimeCore must not directly persist state.  The supervisor is the sole
+    authority for committing state+events via
+    ``SQLiteRunStore.apply_cycle_transition()``.
+    """
     def __init__(self, db: SQLiteRunStore) -> None:
         self.db = db
 
@@ -24,24 +32,28 @@ class DBAdapter:
         return state
 
     def save(self, run_id: str, state) -> None:
-        self.db.save_state(run_id, state)
+        raise NotImplementedError(
+            "StateSeeder.save() must not be called directly. "
+            "Use SQLiteRunStore.apply_cycle_transition() to persist state atomically."
+        )
 
 
 def create_app(db_path: str = 'runtime.db') -> FastAPI:
     db = SQLiteRunStore(db_path)
     events = EventManager(db, LiveEventBus())
-    memory_sink: list[dict] = []
-    registry = build_tool_registry(memory_sink=memory_sink, allowed_roots=['.'])
+    registry = build_tool_registry(allowed_roots=['.'])
 
     def runtime_factory() -> RuntimeCore:
+        # Each supervisor gets its own RuntimeCore with a private InMemoryStateStore.
+        # The supervisor seeds the store from SQLite on start().
         return RuntimeCore(
-            state_store=DBAdapter(db),
+            state_store=InMemoryStateStore(),
             gate=ActionGate(registry),
             executor=Executor(registry),
         )
 
     scheduler = RuntimeScheduler(runtime_factory=runtime_factory, events=events, db=db)
-    app = FastAPI(title='subjective_runtime_v2_1 phase2')
+    app = FastAPI(title='subjective_runtime_v2_1 phase3')
     app.include_router(build_router(runtime_factory, scheduler, db, events))
 
     @app.on_event('startup')

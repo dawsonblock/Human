@@ -30,4 +30,8 @@ class Executor:
             "result": result.output,
             "error": result.error,
             "latency_ms": result.latency_ms,
+            "memory_writes": result.memory_writes,
+            "state_delta": result.state_delta,
+            "observations": result.observations,
+            "artifacts": result.artifacts,
         }

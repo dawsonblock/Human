@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Callable
 
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
-from subjective_runtime_v2_1.runtime.events import EventManager
+from subjective_runtime_v2_1.runtime.events import EventManager, RuntimeEvent
+from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.util.time import now_ts
 
 
 @dataclass(slots=True)
@@ -53,6 +55,10 @@ class RunSupervisor:
         state = self.run_store.load_state(self.run_id)
         if state is not None:
             self.run_store.save_state(self.run_id, state, status='running')
+            # Seed the runtime's internal InMemoryStateStore with the persisted
+            # state so the first cycle reads the correct prior state rather than
+            # starting from a blank AgentStateV2_1.
+            self.runtime.state_store.save(self.run_id, state)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_loop())
         await self.events.publish(self.run_id, 'run_supervisor_started', {'config': asdict(self.config)})
@@ -89,6 +95,99 @@ class RunSupervisor:
         await self._input_queue.put(inputs)
         await self.events.publish(self.run_id, 'input_enqueued', {'inputs': inputs})
 
+    def _approval_event_draft(self, event_type: str, action_id: str, decided_at: str) -> RuntimeEventDraft:
+        """Build a single approval event draft (approve or deny)."""
+        return RuntimeEventDraft(
+            type=event_type,
+            payload={"action_id": action_id, "decided_at": decided_at},
+        )
+
+    async def _mutate_state(
+        self,
+        fn: Callable,
+    ) -> list[dict[str, Any]]:
+        """Acquire _cycle_lock, load state, apply mutation, commit atomically.
+
+        ``fn(state) -> list[RuntimeEventDraft]`` mutates state in-place and
+        returns the event drafts to persist.  Returning an empty list is the
+        signal that nothing matched; in that case no DB write is performed and
+        an empty list is returned to the caller.
+
+        Returns the committed event rows (with seq and created_at filled in).
+        """
+        async with self._cycle_lock:
+            state = self.run_store.load_state(self.run_id)
+            if state is None:
+                return []
+            event_drafts = fn(state)
+            if not event_drafts:
+                return []
+            # Sync the runtime's in-memory buffer so the next cycle picks up
+            # the mutated state rather than an outdated snapshot.
+            self.runtime.state_store.save(self.run_id, state)
+            transition = CycleTransition(
+                run_id=self.run_id,
+                cycle_id=state.cycle_id,
+                state=state,
+                events=event_drafts,
+            )
+            return self.run_store.apply_cycle_transition(transition)
+
+    async def approve_action(self, action_id: str) -> bool:
+        """Mark the pending approval request as approved and re-queue for execution."""
+        decided_at = now_ts()
+
+        def _approve(state):
+            for req in state.approval_requests:
+                if req.get("action_id") == action_id and req.get("status") == "pending":
+                    req["status"] = "approved"
+                    req["decided_at"] = decided_at
+                    return [self._approval_event_draft("approval_granted", action_id, decided_at)]
+            return []
+
+        committed = await self._mutate_state(_approve)
+        if not committed:
+            return False
+        await self.events.publish_persisted_batch([
+            RuntimeEvent(
+                run_id=row["run_id"],
+                seq=row["seq"],
+                type=row["type"],
+                payload=row["payload"],
+                created_at=row["created_at"],
+            )
+            for row in committed
+        ])
+        await self._input_queue.put({"_approval_granted": action_id})
+        return True
+
+    async def deny_action(self, action_id: str) -> bool:
+        """Mark the pending approval request as denied."""
+        decided_at = now_ts()
+
+        def _deny(state):
+            for req in state.approval_requests:
+                if req.get("action_id") == action_id and req.get("status") == "pending":
+                    req["status"] = "denied"
+                    req["decided_at"] = decided_at
+                    return [self._approval_event_draft("approval_denied", action_id, decided_at)]
+            return []
+
+        committed = await self._mutate_state(_deny)
+        if not committed:
+            return False
+        await self.events.publish_persisted_batch([
+            RuntimeEvent(
+                run_id=row["run_id"],
+                seq=row["seq"],
+                type=row["type"],
+                payload=row["payload"],
+                created_at=row["created_at"],
+            )
+            for row in committed
+        ])
+        return True
+
     async def _run_loop(self) -> None:
         while not self._stopped:
             if self._paused:
@@ -104,50 +203,26 @@ class RunSupervisor:
             idle_tick = len(pending_inputs) == 0
 
             async with self._cycle_lock:
-                state = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
+                transition = self.runtime.cycle(self.run_id, merged_inputs, idle_tick=idle_tick)
+                # Atomically commit state + all cycle events to SQLite inside
+                # the same lock so no approve/deny can interleave between
+                # compute and commit.
+                committed = self.run_store.apply_cycle_transition(transition)
 
-            if state.last_action is not None:
-                await self.events.publish(
-                    self.run_id,
-                    'tool_call_proposed',
-                    {'cycle_id': state.cycle_id, 'last_action': state.last_action},
+            # Fan-out to SSE subscribers can happen outside the lock — these
+            # rows are already durably committed.
+            await self.events.publish_persisted_batch([
+                RuntimeEvent(
+                    run_id=row['run_id'],
+                    seq=row['seq'],
+                    type=row['type'],
+                    payload=row['payload'],
+                    created_at=row['created_at'],
                 )
-            if state.last_outcome is not None:
-                event_type = 'tool_call_executed' if state.last_outcome.get('status') == 'ok' else 'tool_call_failed'
-                await self.events.publish(
-                    self.run_id,
-                    event_type,
-                    {'cycle_id': state.cycle_id, 'last_action': state.last_action, 'last_outcome': state.last_outcome},
-                )
-            if state.approval_requests:
-                latest = state.approval_requests[-1]
-                if latest.get('status') == 'pending':
-                    await self.events.publish(self.run_id, 'approval_requested', latest)
+                for row in committed
+            ])
 
-            await self.events.publish(
-                self.run_id,
-                'cycle_completed',
-                {
-                    'cycle_id': state.cycle_id,
-                    'idle_tick': idle_tick,
-                    'focus': [c.kind for c in state.active_focus],
-                    'tensions': [t.kind for t in state.tensions],
-                    'last_action': state.last_action,
-                    'last_outcome': state.last_outcome,
-                },
-            )
-            await self.events.publish(
-                self.run_id,
-                'state_updated',
-                {
-                    'cycle_id': state.cycle_id,
-                    'regulation': state.regulation,
-                    'continuity_summary': state.continuity_field.summary,
-                    'cognitive_mode': state.cognitive_mode,
-                    'risk_appetite': state.risk_appetite,
-                },
-            )
-            await asyncio.sleep(self._compute_sleep_interval(state, idle_tick))
+            await asyncio.sleep(self._compute_sleep_interval(transition.state, idle_tick))
 
     async def _drain_inputs(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []

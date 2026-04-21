@@ -6,16 +6,17 @@ from subjective_runtime_v2_1.state.store import InMemoryStateStore
 
 
 def build_runtime():
-    registry = build_tool_registry(memory_sink=[], allowed_roots=["."])
+    registry = build_tool_registry(allowed_roots=["."])
     return RuntimeCore(InMemoryStateStore(), ActionGate(registry), Executor(registry))
 
 
 def test_repeated_failure_pushes_toward_exploit_and_higher_burden():
     runtime = build_runtime()
-    s1 = runtime.cycle("r", {"text": "start", "observed_status": "stable"})
+    r1 = runtime.cycle("r", {"text": "start", "observed_status": "stable"})
+    s1 = r1.new_state
     s1.self_model["limits"]["blocked_tools"] = ["echo", "memory_write"]
     runtime.state_store.save("r", s1)
-    s2 = runtime.cycle("r", {"text": "again", "observed_status": "degraded"})
-    s3 = runtime.cycle("r", {"text": "again", "observed_status": "degraded"})
-    assert s3.regulation["unresolved_loop_burden"] >= s2.regulation["unresolved_loop_burden"]
-    assert s3.cognitive_mode == "EXPLOIT"
+    r2 = runtime.cycle("r", {"text": "again", "observed_status": "degraded"})
+    r3 = runtime.cycle("r", {"text": "again", "observed_status": "degraded"})
+    assert r3.new_state.regulation["unresolved_loop_burden"] >= r2.new_state.regulation["unresolved_loop_burden"]
+    assert r3.new_state.cognitive_mode == "EXPLOIT"
