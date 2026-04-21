@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from subjective_runtime_v2_1.action.context import ExecutionContext
 from subjective_runtime_v2_1.action.contracts import ToolCall, ToolResult
 from subjective_runtime_v2_1.action.tools.base import Tool
@@ -18,7 +20,7 @@ class ToolRegistry:
         return self._tools[name]
 
     def specs(self) -> list[dict]:
-        return [tool.spec.__dict__ for tool in self._tools.values()]
+        return [asdict(tool.spec) for tool in self._tools.values()]
 
     def invoke(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
         return self.get(call.tool_name).invoke(call, ctx)

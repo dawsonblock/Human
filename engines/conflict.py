@@ -35,7 +35,7 @@ class ConflictEngine:
                 preferred_resolution_mode="stabilize",
             ))
 
-        if state.raw_observations and state.interpreted_percepts.get("status") == "stable":
+        if state.raw_observations and state.world_model.get("expected_status") == "stable":
             last_obs = state.raw_observations[-1]
             observed = last_obs.payload.get("observed_status")
             if observed and observed != "stable":

@@ -12,13 +12,16 @@ class DiscrepancyModule(Module):
         if not state.raw_observations:
             return []
         observed = state.raw_observations[-1].payload.get("observed_status")
-        interpreted = state.interpreted_percepts.get("status")
-        if observed and interpreted and observed != interpreted:
+        # Compare against the world-model's expected status, not the interpreted
+        # percept that was just set from the same input in this cycle — those
+        # would always be equal and can never produce a discrepancy.
+        expected = state.world_model.get("expected_status")
+        if observed and expected and observed != expected:
             return [Candidate(
                 id=new_id("cand"),
                 source=self.name,
                 kind="status_mismatch",
-                content={"observed": observed, "interpreted": interpreted},
+                content={"observed": observed, "expected": expected},
                 confidence=0.9,
                 salience=0.7,
                 goal_relevance=0.6,

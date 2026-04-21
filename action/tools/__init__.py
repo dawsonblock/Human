@@ -21,7 +21,6 @@ def build_tool_registry(allowed_roots: list[str], *, memory_sink: list[dict] | N
     from subjective_runtime_v2_1.action.tools.echo import EchoTool
     from subjective_runtime_v2_1.action.tools.file_read import FileReadTool
     from subjective_runtime_v2_1.action.tools.file_write import FileWriteTool
-    from subjective_runtime_v2_1.action.tools.http_get import HttpGetTool
     from subjective_runtime_v2_1.action.tools.memory_write import MemoryWriteTool
 
     registry = ToolRegistry()
@@ -29,5 +28,6 @@ def build_tool_registry(allowed_roots: list[str], *, memory_sink: list[dict] | N
     registry.register(MemoryWriteTool())
     registry.register(FileReadTool(allowed_roots=allowed_roots))
     registry.register(FileWriteTool(allowed_roots=allowed_roots))
-    registry.register(HttpGetTool())
+    # http_get is not registered: the implementation is a non-functional stub.
+    # Add a real bounded HTTP client here when that capability is needed.
     return registry
