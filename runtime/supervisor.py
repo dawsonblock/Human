@@ -96,6 +96,21 @@ class RunSupervisor:
             self.run_store.save_state(self.run_id, state, status='running')
         await self.events.publish(self.run_id, 'run_resumed', {})
 
+    async def recover_paused(self) -> None:
+        """Restore a paused run recovered from persistence.
+
+        Seeds the runtime's in-memory buffer from SQLite and starts the loop
+        task in a paused state so that a subsequent call to ``resume()`` is
+        sufficient to restart execution.  Callers must not mutate ``_paused``
+        or ``_task`` directly.
+        """
+        state = self.run_store.load_state(self.run_id)
+        if state is not None:
+            self.runtime.state_store.save(self.run_id, state)
+        self._paused = True
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run_loop())
+
     async def inject_input(self, inputs: dict[str, Any]) -> None:
         await self._input_queue.put(inputs)
         await self.events.publish(self.run_id, 'input_enqueued', {'inputs': inputs})

@@ -196,11 +196,13 @@ class RuntimeCore:
         chosen = None
 
         approval_id = inputs.get("_approval_granted") if inputs else None
+        matched_approved = False
         if approval_id:
             # Execute a previously approved action exactly once.
             # The request status transitions: pending → approved (by supervisor) → executed (here).
             for req in state.approval_requests:
                 if req.get("action_id") == approval_id and req.get("status") == "approved":
+                    matched_approved = True
                     chosen = ActionOption(
                         id=req["action_id"],
                         name=req.get("reason", req.get("tool_name", "approved_action")),
@@ -230,8 +232,10 @@ class RuntimeCore:
                     # Mark as executed so duplicate approval signals are no-ops.
                     req["status"] = "executed"
                     break
-            state.pending_options = []
-        else:
+
+        if not matched_approved:
+            # No live approved request matched (stale/duplicate signal or no signal):
+            # run the normal planning path so cycles are not stalled.
             state.pending_options = self.planner.propose(state)
             if state.pending_options:
                 ranked = sorted(

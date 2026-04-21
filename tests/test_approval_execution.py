@@ -158,7 +158,11 @@ async def _run_integration(db_path):
     supervisor = await scheduler.create_run("appr_exec", RunConfig(tick_interval_sec=0.05), {})
     await asyncio.sleep(0.05)
 
-    # Inject an approved approval request directly into persisted state
+    # Pause the supervisor before injecting state so the loop cannot race
+    # with our manual state mutation.
+    await supervisor.pause()
+
+    # Inject a pending approval request atomically while the loop is paused.
     state = db.load_state("appr_exec")
     action_id = new_id("act")
     state.approval_requests.append({
@@ -172,9 +176,11 @@ async def _run_integration(db_path):
     db.save_state("appr_exec", state)
     supervisor.runtime.state_store.save("appr_exec", state)
 
-    # Approve → this should enqueue _approval_granted and trigger execution
+    # Approve and resume: approve_action acquires _cycle_lock so state
+    # is committed atomically before the loop sees it.
     ok = await supervisor.approve_action(action_id)
     assert ok is True
+    await supervisor.resume()
 
     # Give the loop time to process the queued approval signal
     await asyncio.sleep(0.25)
