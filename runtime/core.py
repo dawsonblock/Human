@@ -278,11 +278,11 @@ class RuntimeCore:
 
     def _apply_tool_mutations(self, state: AgentStateV2_1, outcome: dict) -> None:
         """Apply memory_writes and state_delta from tool execution to state."""
-        for entry in outcome.get("memory_writes") or []:
-            # Ensure cycle_id is stamped on every entry before routing.
-            if "cycle_id" not in entry:
-                entry = dict(entry, cycle_id=state.cycle_id)
-            self.memory.apply_memory_write(state, entry)
+        for raw_entry in outcome.get("memory_writes") or []:
+            # Ensure cycle_id is stamped on the routed record.  We build a new
+            # dict rather than mutating the ToolResult entry in place.
+            routed = raw_entry if "cycle_id" in raw_entry else dict(raw_entry, cycle_id=state.cycle_id)
+            self.memory.apply_memory_write(state, routed)
 
         # Trim working_memory to its cap after all writes.
         if len(state.working_memory) > WORKING_MEMORY_CAP:

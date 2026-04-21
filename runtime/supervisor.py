@@ -95,6 +95,13 @@ class RunSupervisor:
         await self._input_queue.put(inputs)
         await self.events.publish(self.run_id, 'input_enqueued', {'inputs': inputs})
 
+    def _approval_event_draft(self, event_type: str, action_id: str, decided_at: str) -> RuntimeEventDraft:
+        """Build a single approval event draft (approve or deny)."""
+        return RuntimeEventDraft(
+            type=event_type,
+            payload={"action_id": action_id, "decided_at": decided_at},
+        )
+
     async def _mutate_state(
         self,
         fn: Callable,
@@ -135,10 +142,7 @@ class RunSupervisor:
                 if req.get("action_id") == action_id and req.get("status") == "pending":
                     req["status"] = "approved"
                     req["decided_at"] = decided_at
-                    return [RuntimeEventDraft(
-                        type="approval_granted",
-                        payload={"action_id": action_id, "decided_at": decided_at},
-                    )]
+                    return [self._approval_event_draft("approval_granted", action_id, decided_at)]
             return []
 
         committed = await self._mutate_state(_approve)
@@ -166,10 +170,7 @@ class RunSupervisor:
                 if req.get("action_id") == action_id and req.get("status") == "pending":
                     req["status"] = "denied"
                     req["decided_at"] = decided_at
-                    return [RuntimeEventDraft(
-                        type="approval_denied",
-                        payload={"action_id": action_id, "decided_at": decided_at},
-                    )]
+                    return [self._approval_event_draft("approval_denied", action_id, decided_at)]
             return []
 
         committed = await self._mutate_state(_deny)
