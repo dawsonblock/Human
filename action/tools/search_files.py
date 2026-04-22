@@ -47,12 +47,18 @@ class SearchFilesTool(Tool):
         matches = []
         files_searched = 0
         for filepath in sorted(directory.glob(glob)):
-            if not filepath.is_file():
+            try:
+                resolved_path = filepath.resolve()
+            except OSError:
                 continue
-            if filepath.stat().st_size > _MAX_FILE_BYTES:
+            if not any(resolved_path.is_relative_to(root) for root in self.allowed_roots):
+                continue
+            if not resolved_path.is_file():
                 continue
             try:
-                text = filepath.read_text(encoding="utf-8", errors="replace")
+                if resolved_path.stat().st_size > _MAX_FILE_BYTES:
+                    continue
+                text = resolved_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
             files_searched += 1
