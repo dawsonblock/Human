@@ -19,7 +19,12 @@ def build_router(runtime_factory, scheduler, db, events):
     async def create_run(req: RunCreateRequest):
         run_id = f"run_{uuid.uuid4().hex[:10]}"
         cfg = RunConfig(**req.config.model_dump())
-        await scheduler.create_run(run_id, cfg, req.inputs)
+        # If a goal was provided, inject it as the first input so the runtime
+        # initialises active_goal on the first cycle.
+        initial_inputs = dict(req.inputs)
+        if req.goal is not None:
+            initial_inputs['_goal'] = req.goal.model_dump()
+        await scheduler.create_run(run_id, cfg, initial_inputs if initial_inputs else None)
         state = db.load_state(run_id)
         return {
             'run_id': run_id,
@@ -31,12 +36,82 @@ def build_router(runtime_factory, scheduler, db, events):
     async def list_runs():
         return {'runs': [asdict(r) for r in db.list_runs()]}
 
+    @router.get('/runs/{run_id}')
+    async def get_run(run_id: str):
+        meta = db.get_run(run_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        return asdict(meta)
+
     @router.get('/runs/{run_id}/state')
     async def get_state(run_id: str):
         state = db.load_state(run_id)
         if state is None:
             raise HTTPException(status_code=404, detail='run not found')
         return asdict(state)
+
+    @router.get('/runs/{run_id}/goal')
+    async def get_goal(run_id: str):
+        state = db.load_state(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        if state.active_goal is None:
+            return {'goal': None}
+        return {'goal': asdict(state.active_goal)}
+
+    @router.get('/runs/{run_id}/plan')
+    async def get_plan(run_id: str):
+        state = db.load_state(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        if state.active_plan is None:
+            return {'plan': None}
+        return {'plan': asdict(state.active_plan)}
+
+    @router.get('/runs/{run_id}/artifacts')
+    async def list_artifacts(run_id: str):
+        state = db.load_state(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        return {'artifacts': [asdict(a) for a in state.artifacts]}
+
+    @router.get('/runs/{run_id}/summary')
+    async def get_summary(run_id: str):
+        meta = db.get_run(run_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        state = db.load_state(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        return {
+            'run_id': run_id,
+            'status': meta.status,
+            'cycle_id': state.cycle_id,
+            'stop_reason': state.stop_reason,
+            'run_outcome': state.run_outcome,
+            'total_actions': state.total_actions,
+            'last_meaningful_action_ts': state.last_meaningful_action_ts,
+            'goal': asdict(state.active_goal) if state.active_goal else None,
+            'plan_status': state.active_plan.status if state.active_plan else None,
+            'plan_current_step': state.active_plan.current_step if state.active_plan else None,
+            'artifact_count': len(state.artifacts),
+            'pending_approvals': [
+                r for r in state.approval_requests if r.get('status') == 'pending'
+            ],
+        }
+
+    @router.get('/approvals/pending')
+    async def list_pending_approvals():
+        """List all pending approval requests across all runs."""
+        pending = []
+        for meta in db.list_runs():
+            state = db.load_state(meta.run_id)
+            if state is None:
+                continue
+            for req in state.approval_requests:
+                if req.get('status') == 'pending':
+                    pending.append({**req, 'run_id': meta.run_id})
+        return {'pending': pending}
 
     @router.post('/runs/{run_id}/input')
     async def enqueue_input(run_id: str, req: InputRequest):
@@ -104,6 +179,13 @@ def build_router(runtime_factory, scheduler, db, events):
         supervisor = scheduler.get(run_id)
         if supervisor is None:
             raise HTTPException(status_code=404, detail='run not found')
+        # Resume plan if it was blocked waiting for approval
+        state = db.load_state(run_id)
+        if state and state.active_plan and state.active_plan.status == 'blocked':
+            state.active_plan.status = 'active'
+            state.stop_reason = None
+            db.save_state(run_id, state)
+            supervisor.runtime.state_store.save(run_id, state)
         ok = await supervisor.approve_action(req.action_id)
         if not ok:
             raise HTTPException(status_code=404, detail='pending approval request not found')
@@ -117,6 +199,13 @@ def build_router(runtime_factory, scheduler, db, events):
         ok = await supervisor.deny_action(req.action_id)
         if not ok:
             raise HTTPException(status_code=404, detail='pending approval request not found')
+        # Mark plan failed/blocked on denial
+        state = db.load_state(run_id)
+        if state and state.active_plan and state.active_plan.status == 'blocked':
+            state.active_plan.status = 'failed'
+            state.stop_reason = 'blocked'
+            state.run_outcome = {'stop_reason': 'blocked', 'reason': 'approval_denied'}
+            db.save_state(run_id, state)
         return {'run_id': run_id, 'action_id': req.action_id, 'status': 'denied'}
 
     return router

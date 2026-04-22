@@ -7,11 +7,15 @@ from typing import Any
 from subjective_runtime_v2_1.state.models import (
     ActionOption,
     AgentStateV2_1,
+    Artifact,
     Candidate,
     ConflictItem,
     ContinuityTrace,
+    Goal,
     InterpretiveBias,
     NarrativeFrame,
+    Plan,
+    PlanStep,
     RawObservation,
     Tension,
     ValenceSignal,
@@ -58,6 +62,28 @@ def _action_from_dict(data: dict[str, Any]) -> ActionOption:
     return ActionOption(**data)
 
 
+def _plan_step_from_dict(data: dict[str, Any]) -> PlanStep:
+    return PlanStep(**data)
+
+
+def _plan_from_dict(data: dict[str, Any] | None) -> Plan | None:
+    if data is None:
+        return None
+    d = dict(data)
+    d['steps'] = [_plan_step_from_dict(s) for s in d.get('steps', [])]
+    return Plan(**d)
+
+
+def _goal_from_dict(data: dict[str, Any] | None) -> Goal | None:
+    if data is None:
+        return None
+    return Goal(**data)
+
+
+def _artifact_from_dict(data: dict[str, Any]) -> Artifact:
+    return Artifact(**data)
+
+
 def state_from_dict(data: dict[str, Any]) -> AgentStateV2_1:
     payload = dict(data)
     payload['raw_observations'] = [_raw_from_dict(x) for x in payload.get('raw_observations', [])]
@@ -87,6 +113,15 @@ def state_from_dict(data: dict[str, Any]) -> AgentStateV2_1:
     }))
     payload['interpretive_bias'] = _bias_from_dict(payload.get('interpretive_bias', {}))
     payload['workspace'] = [_candidate_from_dict(x) for x in payload.get('workspace', [])]
+    payload['active_goal'] = _goal_from_dict(payload.get('active_goal'))
+    payload['active_plan'] = _plan_from_dict(payload.get('active_plan'))
+    payload['artifacts'] = [_artifact_from_dict(x) for x in payload.get('artifacts', [])]
+    # Default new fields absent from older persisted state rows
+    payload.setdefault('stop_reason', None)
+    payload.setdefault('run_outcome', {})
+    payload.setdefault('total_actions', 0)
+    payload.setdefault('total_replans', 0)
+    payload.setdefault('last_meaningful_action_ts', None)
     return AgentStateV2_1(**payload)
 
 

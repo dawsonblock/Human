@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from subjective_runtime_v2_1.action.executor import Executor
 from subjective_runtime_v2_1.action.gate import ActionGate
@@ -13,6 +16,8 @@ from subjective_runtime_v2_1.runtime.events import EventManager, LiveEventBus
 from subjective_runtime_v2_1.runtime.scheduler import RuntimeScheduler
 from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
 from subjective_runtime_v2_1.state.store import InMemoryStateStore
+
+_STATIC_DIR = Path(__file__).parent / 'static'
 
 
 class StateSeeder:
@@ -40,10 +45,11 @@ class StateSeeder:
         )
 
 
-def create_app(db_path: str = 'runtime.db') -> FastAPI:
+def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = None) -> FastAPI:
+    roots = allowed_roots or ['.']
     db = SQLiteRunStore(db_path)
     events = EventManager(db, LiveEventBus())
-    registry = build_tool_registry(allowed_roots=['.'])
+    registry = build_tool_registry(allowed_roots=roots)
 
     def runtime_factory() -> RuntimeCore:
         # Each supervisor gets its own RuntimeCore with a private InMemoryStateStore.
@@ -52,6 +58,7 @@ def create_app(db_path: str = 'runtime.db') -> FastAPI:
             state_store=InMemoryStateStore(),
             gate=ActionGate(registry),
             executor=Executor(registry),
+            allowed_roots=roots,
         )
 
     scheduler = RuntimeScheduler(runtime_factory=runtime_factory, events=events, db=db)
@@ -61,8 +68,16 @@ def create_app(db_path: str = 'runtime.db') -> FastAPI:
         await scheduler.recover_runs()
         yield
 
-    app = FastAPI(title='subjective_runtime_v2_1 phase3', lifespan=lifespan)
+    app = FastAPI(title='subjective_runtime_v2_1', lifespan=lifespan)
     app.include_router(build_router(runtime_factory, scheduler, db, events))
+
+    # Serve the single-page UI
+    if _STATIC_DIR.exists():
+        app.mount('/static', StaticFiles(directory=str(_STATIC_DIR)), name='static')
+
+        @app.get('/', include_in_schema=False)
+        async def serve_ui():
+            return FileResponse(str(_STATIC_DIR / 'index.html'))
 
     app.state.scheduler = scheduler
     app.state.db = db
