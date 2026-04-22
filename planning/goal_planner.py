@@ -5,12 +5,12 @@ goal type to select a template and fills in concrete tool calls.  Re-planning
 only happens on failure, contradiction, or completion boundary.
 
 Supported goal types:
-- inspect_workspace  → list_directory + file_read per file
-- summarize_files    → file_read per file + append_note(summary)
-- extract_facts      → file_read per file + memory_write(episode)
+- inspect_workspace  → list_directory
+- summarize_files    → list_directory + append_note(summary)
+- extract_facts      → list_directory + memory_write(episode)
 - draft_note         → append_note
 - propose_write      → write_file_preview + file_write (gated)
-- generic            → echo the goal description
+- generic            → echo + memory_write(episode)
 """
 from __future__ import annotations
 
