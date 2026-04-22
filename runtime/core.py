@@ -456,15 +456,20 @@ class RuntimeCore:
         """Mark the current plan step complete/failed and advance the pointer."""
         events: list[RuntimeEventDraft] = []
         plan = state.active_plan
-        if plan is None or plan.current_step >= len(plan.steps):
+        if (
+            plan is None
+            or plan.status != "active"
+            or plan.current_step >= len(plan.steps)
+        ):
             return events
 
         step = plan.steps[plan.current_step]
-        # Only advance if this outcome is for the current step
-        is_plan_action = (
+        executed_step_id = outcome.get("step_id") or action_id
+        is_current_plan_step = (
             step.status in ("pending", "running")
+            and executed_step_id == step.id
         )
-        if not is_plan_action:
+        if not is_current_plan_step:
             return events
 
         ts = now_ts()
