@@ -287,11 +287,24 @@ async function refreshSummary(runId) {
   const ab = document.getElementById('artifacts-body');
   if (ab) {
     if (artifacts.artifacts && artifacts.artifacts.length > 0) {
-      ab.innerHTML = artifacts.artifacts.map(a => `
+      const artifactMap = new Map();
+      ab.innerHTML = artifacts.artifacts.map((a, index) => {
+        const artifactId = `artifact-${index}`;
+        artifactMap.set(artifactId, a);
+        return `
         <div class="art-row">
-          <div class="art-title" onclick='showArtifact(${JSON.stringify(a)})'>${escHtml(a.title)}</div>
+          <div class="art-title" data-artifact-id="${artifactId}">${escHtml(a.title)}</div>
           <div class="art-type">${a.type} — ${new Date(a.created_at * 1000).toLocaleTimeString()}</div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
+      ab.querySelectorAll('.art-title').forEach(el => {
+        el.addEventListener('click', () => {
+          const artifact = artifactMap.get(el.dataset.artifactId);
+          if (artifact) {
+            showArtifact(artifact);
+          }
+        });
+      });
     } else {
       ab.innerHTML = '<span style="color:#4a5568;font-size:12px">No artifacts yet</span>';
     }
