@@ -109,7 +109,6 @@ class RuntimeCore:
         idle_tick: bool = False,
         max_cycles: int = 0,
         max_actions: int = 0,
-        max_replans: int = 3,
     ) -> CycleTransition:
         """Run one cognitive cycle and return a CycleTransition.
 
