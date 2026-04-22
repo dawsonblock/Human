@@ -506,13 +506,17 @@ class RuntimeCore:
                     },
                 ))
             else:
+                next_step = plan.steps[plan.current_step]
+                next_step.status = "running"
+                if next_step.started_at is None:
+                    next_step.started_at = ts
                 events.append(RuntimeEventDraft(
                     type="plan_step_started",
                     payload={
                         "plan_id": plan.id,
-                        "step_id": plan.steps[plan.current_step].id,
+                        "step_id": next_step.id,
                         "step_index": plan.current_step,
-                        "tool_name": plan.steps[plan.current_step].tool_name,
+                        "tool_name": next_step.tool_name,
                     },
                 ))
         else:
