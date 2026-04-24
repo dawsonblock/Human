@@ -4,15 +4,18 @@ import asyncio
 import uuid
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+import pty
+import os
+import fcntl
 
-from subjective_runtime_v2_1.api.schemas import ApprovalDecision, InputRequest, RunCreateRequest
+from subjective_runtime_v2_1.api.schemas import ApprovalDecision, InputRequest, RunCreateRequest, RunConfigModel
 from subjective_runtime_v2_1.runtime.events import RuntimeEvent
 from subjective_runtime_v2_1.runtime.supervisor import RunConfig
 
 
-def build_router(runtime_factory, scheduler, db, events):
+def build_router(runtime_factory, scheduler, db, events, registry=None):
     router = APIRouter()
 
     @router.post('/runs')
@@ -207,5 +210,92 @@ def build_router(runtime_factory, scheduler, db, events):
             state.run_outcome = {'stop_reason': 'blocked', 'reason': 'approval_denied'}
             db.save_state(run_id, state)
         return {'run_id': run_id, 'action_id': req.action_id, 'status': 'denied'}
+
+    @router.get('/runtime/tools')
+    async def list_tools():
+        if registry is None:
+            return {'tools': []}
+        return {'tools': [{'name': t.name, 'description': t.description} for t in registry.tools.values()]}
+
+    @router.get('/runtime/config-defaults')
+    async def get_config_defaults():
+        return RunConfigModel().model_dump()
+
+    @router.get('/runs/{run_id}/events/recent')
+    async def get_recent_events(run_id: str, limit: int = 200):
+        if db.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        events_list = db.load_events(run_id)
+        return {'events': events_list[-limit:]}
+
+    @router.get('/runs/{run_id}/state/compact')
+    async def get_compact_state(run_id: str):
+        state = db.load_state(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        return {
+            'run_id': run_id,
+            'cycle_id': state.cycle_id,
+            'active_focus': state.active_focus,
+            'working_memory': state.working_memory,
+            'hypotheses': state.hypotheses,
+            'tensions': state.tensions,
+            'conflict_field': state.conflict_field,
+            'continuity_field': state.continuity_field,
+            'pre_narrative': state.pre_narrative,
+            'post_narrative': state.post_narrative,
+            'interpretive_bias': state.interpretive_bias,
+            'pending_options': state.pending_options,
+            'last_action': asdict(state.last_action) if getattr(state, 'last_action', None) else None,
+            'last_outcome': asdict(state.last_outcome) if getattr(state, 'last_outcome', None) else None,
+            'world_model': state.world_model,
+            'self_model': getattr(state, 'self_model', None),
+        }
+
+    @router.websocket('/terminal')
+    async def terminal_endpoint(websocket: WebSocket):
+        await websocket.accept()
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.environ["TERM"] = "xterm-256color"
+            os.execvp("bash", ["bash", "-i"])
+        
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        
+        loop = asyncio.get_running_loop()
+        
+        def pty_reader():
+            try:
+                data = os.read(fd, 4096)
+                if data:
+                    asyncio.run_coroutine_threadsafe(websocket.send_text(data.decode('utf-8', errors='replace')), loop)
+            except BlockingIOError:
+                pass
+            except OSError:
+                loop.remove_reader(fd)
+                
+        loop.add_reader(fd, pty_reader)
+        
+        try:
+            while True:
+                data = await websocket.receive_text()
+                try:
+                    os.write(fd, data.encode('utf-8'))
+                except OSError:
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            loop.remove_reader(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+            except OSError:
+                pass
 
     return router

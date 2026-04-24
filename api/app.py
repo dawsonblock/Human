@@ -69,7 +69,7 @@ def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = No
         yield
 
     app = FastAPI(title='subjective_runtime_v2_1', lifespan=lifespan)
-    app.include_router(build_router(runtime_factory, scheduler, db, events))
+    app.include_router(build_router(runtime_factory, scheduler, db, events, registry))
 
     # Serve the single-page UI
     if _STATIC_DIR.exists():
@@ -86,3 +86,7 @@ def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = No
 
 
 app = create_app()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("subjective_runtime_v2_1.api.app:app", host="0.0.0.0", port=8000, reload=True)

@@ -44,6 +44,7 @@ class Executor:
                 "state_delta": {},
                 "observations": [],
                 "artifacts": [],
+                "step_id": action.target.get("step_id"),
             }
 
         result.latency_ms = (time.perf_counter() - start) * 1000.0
@@ -58,6 +59,7 @@ class Executor:
             "state_delta": result.state_delta,
             "observations": result.observations,
             "artifacts": result.artifacts,
+            "step_id": action.target.get("step_id"),
         }
 
     def _invoke_with_timeout(self, call: ToolCall, ctx: ExecutionContext, timeout: float):

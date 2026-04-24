@@ -7,7 +7,7 @@ name = "subjective_runtime_v2_1"
 version = "0.1.0"
 description = "Scaffold for a functional testbed of integrated, temporally extended, self-affecting cognition"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
   "pydantic>=2.7",

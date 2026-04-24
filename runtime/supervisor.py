@@ -232,7 +232,6 @@ class RunSupervisor:
                     idle_tick=idle_tick,
                     max_cycles=self.config.max_cycles,
                     max_actions=self.config.max_actions,
-                    max_replans=self.config.max_replans,
                 )
                 # Atomically commit state + all cycle events to SQLite inside
                 # the same lock so no approve/deny can interleave between
