@@ -8,7 +8,7 @@ export interface RuntimeEvent {
   run_id: string;
   seq: number;
   type: EventType;
-  payload: any;
+  payload: unknown;
   created_at: number;
 }
 

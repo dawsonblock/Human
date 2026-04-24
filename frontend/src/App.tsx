@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { client } from './api/client';
-import type { Run, RunSummary, Plan, Artifact } from './api/client';
+import type { Run, RunSummary, Plan, Artifact, AgentState } from './api/client';
 import { subscribeToEvents } from './api/events';
 import type { RuntimeEvent } from './api/events';
 import { 
@@ -13,7 +13,6 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { CognitiveGraph } from './CognitiveGraph';
-import { TerminalOverride } from './TerminalOverride';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -21,58 +20,26 @@ function cn(...inputs: ClassValue[]) {
 
 const App: React.FC = () => {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('run') || null;
+  });
   const [summary, setSummary] = useState<RunSummary | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [state, setState] = useState<any>(null);
+  const [state, setState] = useState<AgentState | null>(null);
   const [events, setEvents] = useState<RuntimeEvent[]>([]);
-  const [approvals, setApprovals] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<Record<string, unknown>[]>([]);
   const [search, setSearch] = useState('');
   const [connected, setConnected] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'graph' | 'terminal'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'graph' | 'help'>('timeline');
+  const [llmConnected, setLlmConnected] = useState<boolean | null>(null);
   
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    refreshGlobal();
-    const interval = setInterval(refreshGlobal, 8000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (selectedRunId) {
-      refreshRun(selectedRunId);
-      setEvents([]);
-      const unsubscribe = subscribeToEvents(
-        selectedRunId,
-        (event) => {
-          setEvents(prev => [...prev, event]);
-          refreshRun(selectedRunId);
-          refreshGlobal();
-        },
-        setConnected
-      );
-      return unsubscribe;
-    } else {
-      setConnected(false);
-      setSummary(null);
-      setPlan(null);
-      setArtifacts([]);
-      setState(null);
-      setEvents([]);
-    }
-  }, [selectedRunId]);
-
-  useEffect(() => {
-    if (timelineRef.current) {
-      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-    }
-  }, [events]);
-
-  const refreshGlobal = async () => {
+  const refreshGlobal = useCallback(async () => {
     try {
       const [runsData, approvalsData] = await Promise.all([
         client.getRuns(),
@@ -80,12 +47,18 @@ const App: React.FC = () => {
       ]);
       setRuns(runsData.runs || []);
       setApprovals(approvalsData.pending || []);
+      try {
+        const llmData = await client.getLLMStatus();
+        setLlmConnected((llmData as { available: boolean }).available);
+      } catch {
+        setLlmConnected(false);
+      }
     } catch (e) {
       console.error(e);
     }
-  };
+  }, []);
 
-  const refreshRun = async (id: string) => {
+  const refreshRun = useCallback(async (id: string) => {
     try {
       const [summaryData, planData, artifactsData, stateData] = await Promise.all([
         client.getSummary(id),
@@ -100,9 +73,57 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
     }
-  };
+  }, []);
 
-  const handleCreateRun = async (payload: any) => {
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshGlobal();
+    const interval = setInterval(refreshGlobal, 8000);
+    return () => clearInterval(interval);
+  }, [refreshGlobal]);
+
+  useEffect(() => {
+    if (selectedRunId) {
+      // Update URL when run changes
+      const url = new URL(window.location.href);
+      url.searchParams.set('run', selectedRunId);
+      window.history.replaceState({}, '', url.toString());
+
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      refreshRun(selectedRunId);
+      setTimeout(() => setEvents([]), 0);
+      const unsubscribe = subscribeToEvents(
+        selectedRunId,
+        (event) => {
+          setEvents(prev => [...prev, event]);
+          refreshRun(selectedRunId);
+          refreshGlobal();
+        },
+        setConnected
+      );
+      return unsubscribe;
+    } else {
+      // Clear URL when run is deselected
+      const url = new URL(window.location.href);
+      url.searchParams.delete('run');
+      window.history.replaceState({}, '', url.toString());
+
+      setConnected(false);
+      setSummary(null);
+      setPlan(null);
+      setArtifacts([]);
+      setState(null);
+      setTimeout(() => setEvents([]), 0);
+    }
+  }, [selectedRunId, refreshGlobal, refreshRun]);
+
+  useEffect(() => {
+    if (timelineRef.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
+  }, [events]);
+
+  const handleCreateRun = async (payload: Record<string, unknown>) => {
     try {
       const res = await client.createRun(payload);
       setShowComposer(false);
@@ -213,6 +234,10 @@ const App: React.FC = () => {
                     <span className="text-[0.6rem] font-black text-[#64748b] uppercase tracking-tighter">{connected ? 'Live Sync' : 'Offline'}</span>
                   </div>
                 )}
+                <div className={cn("flex items-center gap-2 bg-white/[0.03] px-2.5 py-0.5 rounded-full border border-white/5", llmConnected === null && "opacity-40")}>
+                  <div className={cn("w-1 h-1 rounded-full", llmConnected ? "bg-violet-400 shadow-[0_0_5px_#a78bfa] animate-pulse" : "bg-[#64748b]")} />
+                  <span className="text-[0.6rem] font-black text-[#64748b] uppercase tracking-tighter">{llmConnected ? 'LLM Ready' : 'LLM Offline'}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -245,10 +270,10 @@ const App: React.FC = () => {
                 {/* Regulation Card */}
                 <Card title="Regulation Health" icon={<Shield className="w-3.5 h-3.5" />}>
                    <div className="space-y-3">
-                      <HealthMetric label="Uncertainty Load" value={state?.uncertainty_load} color="blue" />
-                      <HealthMetric label="Continuity Health" value={state?.continuity_health} color="emerald" />
-                      <HealthMetric label="Goal Drift" value={state?.goal_drift} color="orange" />
-                      <HealthMetric label="Overload Pressure" value={state?.overload_pressure} color="red" />
+                      <HealthMetric label="Uncertainty Load" value={state?.regulation?.uncertainty_load} color="blue" />
+                      <HealthMetric label="Continuity Health" value={state?.regulation?.continuity_health} color="emerald" />
+                      <HealthMetric label="Goal Drift" value={state?.regulation?.goal_drift} color="orange" />
+                      <HealthMetric label="Overload Pressure" value={state?.regulation?.overload_pressure} color="red" />
                    </div>
                 </Card>
 
@@ -295,12 +320,12 @@ const App: React.FC = () => {
             <div className="flex flex-col overflow-hidden">
               <div className="px-6 py-4 bg-white/[0.02] border-b border-white/5 flex items-center justify-between">
                 <div className="text-[0.65rem] font-black text-[#475569] uppercase tracking-[0.25em]">
-                  {activeTab === 'timeline' ? 'Live Event Sourcing' : activeTab === 'graph' ? 'Cognitive Graph' : 'Operator Terminal'}
+                  {activeTab === 'timeline' ? 'Live Event Sourcing' : 'Cognitive Graph'}
                 </div>
                 <div className="flex bg-[#1a202c] rounded-lg border border-white/5 p-1">
                   <button onClick={() => setActiveTab('timeline')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'timeline' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Timeline</button>
                   <button onClick={() => setActiveTab('graph')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'graph' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Graph</button>
-                  <button onClick={() => setActiveTab('terminal')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'terminal' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Terminal</button>
+                  <button onClick={() => setActiveTab('help')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'help' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Help</button>
                 </div>
               </div>
               <div className="flex-1 overflow-hidden relative bg-[#0a0d14]">
@@ -324,7 +349,7 @@ const App: React.FC = () => {
                   )}
                 </div>
                 {activeTab === 'graph' && <CognitiveGraph state={state} />}
-                {activeTab === 'terminal' && <TerminalOverride />}
+                {activeTab === 'help' && <HelpTab />}
               </div>
             </div>
 
@@ -339,16 +364,16 @@ const App: React.FC = () => {
                       {approvals.map((ap, i) => (
                         <div key={i} className="bg-orange-500/[0.03] border border-orange-500/20 rounded-xl p-4 space-y-3">
                            <div className="flex justify-between items-start">
-                              <div className="text-[0.65rem] font-black text-orange-400 uppercase tracking-wider">{ap.tool_name}</div>
-                              <div className="text-[0.55rem] font-mono text-orange-400/40">ID: {ap.action_id}</div>
+                              <div className="text-[0.65rem] font-black text-orange-400 uppercase tracking-wider">{String(ap.tool_name ?? '')}</div>
+                              <div className="text-[0.55rem] font-mono text-orange-400/40">ID: {String(ap.action_id ?? '')}</div>
                            </div>
-                           <div className="text-[0.75rem] leading-snug font-medium">{ap.reason}</div>
+                           <div className="text-[0.75rem] leading-snug font-medium">{String(ap.reason ?? '')}</div>
                            <div className="text-[0.65rem] p-2 bg-black/20 rounded font-mono text-[#94a3b8] break-all">
                               {JSON.stringify(ap.arguments || ap.affected_resource)}
                            </div>
                            <div className="grid grid-cols-2 gap-2">
-                              <button onClick={() => client.approve(ap.run_id, ap.action_id)} className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 text-[0.65rem] font-black py-2 rounded-lg transition-all uppercase tracking-widest">Approve</button>
-                              <button onClick={() => client.deny(ap.run_id, ap.action_id)} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[0.65rem] font-black py-2 rounded-lg transition-all uppercase tracking-widest">Deny</button>
+                              <button onClick={() => client.approve(String(ap.run_id), String(ap.action_id))} className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 text-[0.65rem] font-black py-2 rounded-lg transition-all uppercase tracking-widest">Approve</button>
+                              <button onClick={() => client.deny(String(ap.run_id), String(ap.action_id))} className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-[0.65rem] font-black py-2 rounded-lg transition-all uppercase tracking-widest">Deny</button>
                            </div>
                         </div>
                       ))}
@@ -536,7 +561,7 @@ const EventRow = ({ event }: { event: RuntimeEvent }) => {
   );
 };
 
-const StateInspector = ({ state }: { state: any }) => {
+const StateInspector = ({ state }: { state: AgentState | null }) => {
   if (!state) return <div className="text-[0.7rem] text-[#475569] py-8 text-center font-medium italic">Introspection layer offline</div>;
 
   const fields = [
@@ -561,7 +586,7 @@ const StateInspector = ({ state }: { state: any }) => {
   );
 };
 
-const AccordionItem = ({ label, icon, value }: { label: string, icon: React.ReactNode, value: any }) => {
+const AccordionItem = ({ label, icon, value }: { label: string, icon: React.ReactNode, value: unknown }) => {
   const [open, setOpen] = useState(false);
   return (
     <div className={cn("bg-[#1a202c]/30 border border-white/5 rounded-xl overflow-hidden transition-all", open && "border-blue-500/20 bg-[#1a202c]/60 shadow-lg")}>
@@ -578,7 +603,7 @@ const AccordionItem = ({ label, icon, value }: { label: string, icon: React.Reac
       {open && (
         <div className="px-4 pb-4 pt-0 border-t border-white/[0.03] text-[0.65rem] font-mono text-[#94a3b8] whitespace-pre-wrap leading-relaxed overflow-x-auto selection:bg-blue-500/30">
           <div className="py-3">
-            {typeof value === 'object' ? JSON.stringify(value, null, 2) : value}
+            {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '')}
           </div>
         </div>
       )}
@@ -586,7 +611,7 @@ const AccordionItem = ({ label, icon, value }: { label: string, icon: React.Reac
   );
 };
 
-const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: any) => void, onCancel: () => void }) => {
+const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<string, unknown>) => void, onCancel: () => void }) => {
   const [type, setType] = useState('operator_request');
   const [description, setDescription] = useState('');
   const [maxActions, setMaxActions] = useState(10);
@@ -606,19 +631,26 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: any) => void
             className="w-full bg-[#0a0d14] border border-white/10 rounded-2xl p-4 text-sm font-semibold focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
           >
             <option value="operator_request">Operator Request</option>
+            <option value="dynamic_llm">Dynamic LLM Plan</option>
             <option value="inspect_workspace">Inspect Workspace</option>
             <option value="summarize_files">Summarize Files</option>
             <option value="extract_facts">Extract Facts</option>
             <option value="draft_note">Draft Note</option>
             <option value="propose_write">Propose Write</option>
           </select>
+          {type === 'dynamic_llm' && (
+            <div className="flex items-center gap-2 mt-2 px-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+              <span className="text-[0.65rem] text-violet-400 font-semibold">Powered by Ollama · llama3.2 · Write any natural language goal</span>
+            </div>
+          )}
         </div>
         <div className="space-y-2">
           <label className="text-[0.65rem] font-black text-[#475569] uppercase tracking-[0.2em] px-1">Goal Description</label>
           <textarea 
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Define the specific achievement criteria..."
+            placeholder={type === 'dynamic_llm' ? "Describe what you want in plain English — e.g. 'List the src folder and summarize what you find'" : "Define the specific achievement criteria..."}
             className="w-full bg-[#0a0d14] border border-white/10 rounded-2xl p-4 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all min-h-[120px] resize-none placeholder:text-[#475569]"
           />
         </div>
@@ -649,5 +681,90 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: any) => void
     </div>
   );
 };
+
+const HelpTab = () => (
+  <div className="p-8 h-full overflow-y-auto bg-[#0a0d14] text-[#cbd5e0]">
+    <div className="max-w-2xl mx-auto space-y-8">
+      <div>
+        <h2 className="text-2xl font-black text-white mb-2 tracking-tight">How to Use the Human Runtime</h2>
+        <p className="text-[#94a3b8] leading-relaxed">
+          Welcome to the Human Cognitive Runtime operator console. This is a bounded local assistant runtime. It can run in two modes: <strong className="text-white">Deterministic</strong> (hard-coded plan templates) or <strong className="text-violet-400">LLM-powered</strong> via a locally running Ollama model (<code className="bg-white/10 px-1 rounded text-xs">llama3.2</code>). The LLM mode allows you to write any natural-language goal and have the system plan and execute it dynamically.
+        </p>
+      </div>
+
+      <div className="space-y-6">
+        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-blue-400 mb-3 flex items-center gap-2">
+            <Plus className="w-5 h-5" /> 1. Start a New Run
+          </h3>
+          <p className="text-sm leading-relaxed mb-3">
+            Click the <strong>New Cognitive Run</strong> button at the bottom of the left sidebar. This opens the Goal Composer where you can define an objective.
+          </p>
+          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+            <li><strong>Tactical Mode:</strong> Select <em>Dynamic LLM Plan</em> to write any natural language goal and have Ollama (llama3.2) generate the steps automatically. Or pick a template mode for structured execution.</li>
+            <li><strong>Description:</strong> Type what you want the system to achieve. In LLM mode, be as descriptive as you like.</li>
+            <li><strong>Max Actions:</strong> A safety constraint on how many steps it's allowed to take before stopping.</li>
+          </ul>
+        </div>
+
+        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-emerald-400 mb-3 flex items-center gap-2">
+            <Activity className="w-5 h-5" /> 2. Monitor Live Status
+          </h3>
+          <p className="text-sm leading-relaxed mb-3">
+            Once a run is active, the center column displays the live execution stream.
+          </p>
+          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+            <li><strong>Timeline:</strong> An Event Sourcing view showing every cognitive cycle, tool call, and plan update in real-time. Click an event to view its full JSON payload.</li>
+            <li><strong>Cognitive Graph:</strong> A visual representation of the agent's internal state (Goals, Plans, Focus Candidates, and Tensions).</li>
+          </ul>
+        </div>
+
+        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-orange-400 mb-3 flex items-center gap-2">
+            <Eye className="w-5 h-5" /> 3. Approve or Deny Actions
+          </h3>
+          <p className="text-sm leading-relaxed mb-3">
+            The runtime features an authority model. Some tool calls may require explicit operator approval.
+          </p>
+          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+            <li>Watch the <strong>Operator Approval Queue</strong> in the right-hand column.</li>
+            <li>Review the requested action and arguments, then click <strong>Approve</strong> or <strong>Deny</strong> to unblock the agent.</li>
+          </ul>
+        </div>
+
+        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-purple-400 mb-3 flex items-center gap-2">
+            <Layers className="w-5 h-5" /> 4. Inspect State & Artifacts
+          </h3>
+          <p className="text-sm leading-relaxed mb-3">
+            Explore the internal representation of the system using the inspector panels on the left and right.
+          </p>
+          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+            <li><strong>Runtime Health & Plan (Left):</strong> Check the uncertainty load, goal drift, and view the multi-step execution plan.</li>
+            <li><strong>Cognitive State Inspector (Right):</strong> Expand internal arrays like Hypotheses and Working Memory.</li>
+            <li><strong>Artifact Browser (Right):</strong> Click any generated artifact to read its complete content in a modal window.</li>
+          </ul>
+        </div>
+
+        <div className="bg-violet-500/10 border border-violet-500/20 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-violet-400 mb-3 flex items-center gap-2">
+            <Zap className="w-5 h-5" /> 5. Using LLM Mode (Recommended)
+          </h3>
+          <p className="text-sm leading-relaxed mb-3">
+            The <strong>Dynamic LLM Plan</strong> mode uses Ollama running locally on your machine to generate a plan from any natural language goal.
+          </p>
+          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+            <li>Ensure the <strong className="text-violet-400">LLM Ready</strong> indicator is lit in the header bar.</li>
+            <li>Click <strong>New Cognitive Run</strong>, select <strong>Dynamic LLM Plan</strong> from the dropdown.</li>
+            <li>Type a goal in plain English, e.g.: <em className="text-white">"List the src/ folder and write a summary of each file"</em></li>
+            <li>The LLM will generate a step-by-step execution plan. The runtime will then execute each step.</li>
+            <li>If the LLM Offline indicator is red, make sure the Ollama desktop app is running, or run <code className="bg-white/10 px-1 rounded text-xs">ollama serve</code> in a terminal.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 export default App;

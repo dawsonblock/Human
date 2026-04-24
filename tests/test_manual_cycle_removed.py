@@ -22,11 +22,11 @@ def client(tmp_path):
 def test_manual_cycle_endpoint_removed(client):
     """POST /runs/{run_id}/cycle must return 404 or 405, not 200."""
     # Create a run first
-    resp = client.post("/runs", json={"inputs": {}, "config": {}})
+    resp = client.post("/api/runs", json={"inputs": {}, "config": {}})
     assert resp.status_code == 200
     run_id = resp.json()["run_id"]
 
-    cycle_resp = client.post(f"/runs/{run_id}/cycle", json={"inputs": {}})
+    cycle_resp = client.post(f"/api/runs/{run_id}/cycle", json={"inputs": {}})
     assert cycle_resp.status_code in (404, 405), (
         f"Expected 404/405 (endpoint removed), got {cycle_resp.status_code}"
     )
@@ -58,17 +58,17 @@ def test_no_cycle_path_in_routes(tmp_path):
 
 
 def test_approve_endpoint_exists(client):
-    resp = client.post("/runs", json={"inputs": {}, "config": {}})
+    resp = client.post("/api/runs", json={"inputs": {}, "config": {}})
     run_id = resp.json()["run_id"]
 
     # Should return 404 (no pending request), not 405 (method not allowed)
-    resp = client.post(f"/runs/{run_id}/approve", json={"action_id": "nonexistent"})
+    resp = client.post(f"/api/runs/{run_id}/approve", json={"action_id": "nonexistent"})
     assert resp.status_code != 405, "approve endpoint must exist"
 
 
 def test_deny_endpoint_exists(client):
-    resp = client.post("/runs", json={"inputs": {}, "config": {}})
+    resp = client.post("/api/runs", json={"inputs": {}, "config": {}})
     run_id = resp.json()["run_id"]
 
-    resp = client.post(f"/runs/{run_id}/deny", json={"action_id": "nonexistent"})
+    resp = client.post(f"/api/runs/{run_id}/deny", json={"action_id": "nonexistent"})
     assert resp.status_code != 405, "deny endpoint must exist"

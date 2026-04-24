@@ -2,8 +2,9 @@ import React, { useMemo } from 'react';
 import { ReactFlow, Background, Controls, MarkerType } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import type { AgentState } from './api/client';
 
-export const CognitiveGraph: React.FC<{ state: any }> = ({ state }) => {
+export const CognitiveGraph: React.FC<{ state: AgentState | null }> = ({ state }) => {
   const { nodes, edges } = useMemo(() => {
     if (!state) return { nodes: [], edges: [] };
     

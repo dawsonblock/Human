@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.115",
   "pydantic>=2.7",
   "uvicorn>=0.30",
+  "ollama>=0.3.0",
 ]
 optional-dependencies.dev = [
   "pytest>=8.0",

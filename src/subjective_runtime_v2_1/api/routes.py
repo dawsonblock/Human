@@ -14,9 +14,25 @@ from subjective_runtime_v2_1.api.schemas import ApprovalDecision, InputRequest, 
 from subjective_runtime_v2_1.runtime.events import RuntimeEvent
 from subjective_runtime_v2_1.runtime.supervisor import RunConfig
 
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+
 
 def build_router(runtime_factory, scheduler, db, events, registry=None):
     router = APIRouter()
+
+    @router.get('/llm/status')
+    async def get_llm_status():
+        if not OLLAMA_AVAILABLE:
+            return {'available': False, 'status': 'Ollama package not installed'}
+        try:
+            ollama.list()
+            return {'available': True, 'status': 'Connected to Ollama'}
+        except Exception as e:
+            return {'available': False, 'status': f'Ollama service unreachable: {str(e)}'}
 
     @router.post('/runs')
     async def create_run(req: RunCreateRequest):
@@ -250,10 +266,20 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
             'last_outcome': asdict(state.last_outcome) if getattr(state, 'last_outcome', None) else None,
             'world_model': state.world_model,
             'self_model': getattr(state, 'self_model', None),
+            'regulation': {
+                'uncertainty_load': state.regulation.get('uncertainty_load', 0.0),
+                'continuity_health': state.regulation.get('continuity_health', 1.0),
+                'goal_drift': state.regulation.get('goal_drift', 0.0),
+                'overload_pressure': state.regulation.get('overload_pressure', 0.0),
+            }
         }
 
     @router.websocket('/terminal')
     async def terminal_endpoint(websocket: WebSocket):
+        if os.getenv("ALLOW_DEV_TERMINAL") != "1":
+            await websocket.close(code=1008, reason="Terminal access disabled by default for security.")
+            return
+
         await websocket.accept()
         pid, fd = pty.fork()
         if pid == 0:

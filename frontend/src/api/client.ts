@@ -20,7 +20,17 @@ export interface RunSummary {
   total_actions: number;
   artifact_count: number;
   goal: Goal | null;
-  pending_approvals: any[];
+  pending_approvals: Record<string, unknown>[];
+}
+
+export interface AgentState {
+  cycle_id: number;
+  active_goal?: Goal;
+  active_plan?: Plan;
+  active_focus?: unknown[];
+  tensions?: unknown[];
+  regulation?: Record<string, number>;
+  [key: string]: unknown;
 }
 
 export interface PlanStep {
@@ -39,7 +49,7 @@ export interface Artifact {
   title: string;
   type: string;
   created_at: number;
-  content: any;
+  content: unknown;
 }
 
 async function fetchJSON(url: string, options: RequestInit = {}) {
@@ -63,8 +73,9 @@ export const client = {
   getArtifacts: (id: string) => fetchJSON(`${API_BASE}/runs/${id}/artifacts`),
   getState: (id: string) => fetchJSON(`${API_BASE}/runs/${id}/state/compact`),
   getApprovals: () => fetchJSON(`${API_BASE}/approvals/pending`),
+  getLLMStatus: () => fetchJSON(`${API_BASE}/llm/status`),
   
-  createRun: (payload: any) => fetchJSON(`${API_BASE}/runs`, {
+  createRun: (payload: Record<string, unknown>) => fetchJSON(`${API_BASE}/runs`, {
     method: 'POST',
     body: JSON.stringify(payload)
   }),

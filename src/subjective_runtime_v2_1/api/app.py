@@ -69,7 +69,7 @@ def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = No
         yield
 
     app = FastAPI(title='subjective_runtime_v2_1', lifespan=lifespan)
-    app.include_router(build_router(runtime_factory, scheduler, db, events, registry))
+    app.include_router(build_router(runtime_factory, scheduler, db, events, registry), prefix="/api")
 
     # Serve the single-page UI
     if _STATIC_DIR.exists():

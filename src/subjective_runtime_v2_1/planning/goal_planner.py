@@ -19,6 +19,16 @@ from typing import Any
 from subjective_runtime_v2_1.state.models import Goal, Plan, PlanStep
 from subjective_runtime_v2_1.util.ids import new_id
 from subjective_runtime_v2_1.util.time import now_ts
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
 
 
 def _step(description: str, tool_name: str, arguments: dict[str, Any]) -> PlanStep:
@@ -39,6 +49,62 @@ def build_plan_for_goal(goal: Goal, allowed_roots: list[str]) -> Plan:
 
     gtype = goal.type.lower()
     desc = goal.description
+
+    if OLLAMA_AVAILABLE and gtype != "operator_request" and gtype != "inspect_workspace" and gtype != "summarize_files" and gtype != "extract_facts" and gtype != "draft_note" and gtype != "propose_write":
+        # Dynamic LLM Planning for custom/generic goals
+        try:
+            system_prompt = """You are an AI planner in a bounded runtime. Your job is to convert a user's goal into a structured JSON array of tool execution steps.
+Available tools:
+- list_directory (arguments: path)
+- append_note (arguments: path, text)
+- memory_write (arguments: kind, payload)
+- file_write (arguments: path, text)
+- write_file_preview (arguments: path, text)
+- echo (arguments: message)
+- search_files (arguments: path, query)
+- file_read (arguments: path)
+
+Return ONLY a valid JSON array of step objects. Each object must have:
+- "description": "Short explanation of the step"
+- "tool_name": "the exact tool name"
+- "arguments": {"key": "value"}
+
+Example Output:
+[
+  {"description": "Acknowledge goal", "tool_name": "echo", "arguments": {"message": "Started"}},
+  {"description": "Read src", "tool_name": "list_directory", "arguments": {"path": "src"}}
+]
+"""
+            res = ollama.chat(model='llama3.2', messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': f"Generate a plan for this goal: {desc}"}
+            ])
+            
+            content = res['message']['content']
+            # Find JSON array in the response
+            start_idx = content.find('[')
+            end_idx = content.rfind(']') + 1
+            if start_idx != -1 and end_idx != -1:
+                json_str = content[start_idx:end_idx]
+                parsed_steps = json.loads(json_str)
+                for step in parsed_steps:
+                    steps.append(_step(step.get('description', 'Auto step'), step['tool_name'], step.get('arguments', {})))
+                
+                stop_conditions = ["Dynamic plan completed"]
+                assumptions = ["LLM generated plan is valid"]
+                
+                return Plan(
+                    id=new_id("plan"),
+                    goal_id=goal.id,
+                    steps=steps,
+                    assumptions=assumptions,
+                    stop_conditions=stop_conditions,
+                    current_step=0,
+                    status="active",
+                    created_at=now_ts(),
+                )
+        except Exception as e:
+            logger.warning(f"Ollama planning failed: {e}. Falling back to deterministic generic planner.")
 
     if gtype == "inspect_workspace":
         steps = [

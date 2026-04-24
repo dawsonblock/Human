@@ -182,5 +182,5 @@ def test_api_routes_importable():
     from subjective_runtime_v2_1.api.app import create_app
     app = create_app(db_path=":memory:")
     routes = [r.path for r in app.routes]
-    assert "/runs" in routes
-    assert "/approvals/pending" in routes
+    assert "/api/runs" in routes
+    assert "/api/approvals/pending" in routes
