@@ -160,7 +160,7 @@ cd ..
 ### 3. Run the test suite
 
 ```bash
-pytest                      # 200+ tests, all passing
+pytest                      # Comprehensive test suite covering core components
 ```
 
 ### 4. Start the server
@@ -546,11 +546,11 @@ Human/
 │   │   └── index.css               # Global styles
 │   ├── vite.config.ts              # Vite + /api proxy
 │   └── package.json
-├── tests/                          # 174 tests
-│   ├── test_compact_state_regression.py
+├── tests/                          # Automated test suite
+│   ├── test_storage_correctness.py  # :memory:, orphans, atomic status
 │   ├── test_llm_planner_validation.py
 │   ├── test_file_tool_hardening.py
-│   └── …46 test files total
+│   └── …
 ├── pyproject.toml                  # Python package + deps (includes ollama>=0.3.0)
 └── README.md
 ```
@@ -571,7 +571,7 @@ pytest tests/test_runtime_authority_gates.py  # Approval authority
 pytest --tb=short -q                          # Quiet output
 ```
 
-**200+ tests, 0 failures.**
+**Automated tests cover all major subsystems.**
 
 ### Test coverage areas
 

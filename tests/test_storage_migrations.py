@@ -24,10 +24,10 @@ def test_fresh_db_initialises_schema(tmp_path):
     assert "storage_meta" in tables
 
 
-def test_fresh_db_schema_version_is_1(tmp_path):
+def test_fresh_db_schema_version_is_2(tmp_path):
     db = SQLiteBackend(tmp_path / "ver.db")
     stats = db.get_storage_stats()
-    assert stats["schema_version"] == 1
+    assert stats["schema_version"] == 2
 
 
 def test_reopen_does_not_wipe_data(tmp_path):
@@ -88,7 +88,7 @@ def test_old_db_without_storage_meta_upgrades(tmp_path):
     # Opening with SQLiteBackend should run migrations without error
     db = SQLiteBackend(db_path)
     stats = db.get_storage_stats()
-    assert stats["schema_version"] == 1
+    assert stats["schema_version"] == 2
     assert db.get_run("run_old") is not None
 
 
@@ -113,6 +113,18 @@ def test_run_artifacts_has_foreign_key(tmp_path):
         # PRAGMA foreign_key_list(table_name)
         fk_list = conn.execute("PRAGMA foreign_key_list('run_artifacts')").fetchall()
         # Returns list of (id, seq, table, from, to, on_update, on_delete, match)
+        assert len(fk_list) > 0
+        fk = fk_list[0]
+        assert fk[2] == "runs"
+        assert fk[3] == "run_id"
+        assert fk[4] == "run_id"
+        assert fk[6] == "CASCADE"
+
+
+def test_run_events_has_foreign_key(tmp_path):
+    db = SQLiteBackend(tmp_path / "fk_events.db")
+    with db._conn() as conn:
+        fk_list = conn.execute("PRAGMA foreign_key_list('run_events')").fetchall()
         assert len(fk_list) > 0
         fk = fk_list[0]
         assert fk[2] == "runs"

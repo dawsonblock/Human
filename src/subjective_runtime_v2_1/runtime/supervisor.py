@@ -62,14 +62,15 @@ class RunSupervisor:
         self._paused = False
         state = self.run_store.load_state(self.run_id)
         if state is not None:
-            self.run_store.save_state(self.run_id, state, status='running')
             # Seed the runtime's internal InMemoryStateStore with the persisted
             # state so the first cycle reads the correct prior state rather than
             # starting from a blank AgentStateV2_1.
             self.runtime.state_store.save(self.run_id, state)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_loop())
-        await self.events.publish(self.run_id, 'run_supervisor_started', {'config': asdict(self.config)})
+        await self.events.transition_run_status(
+            self.run_id, 'running', 'run_supervisor_started', {'config': asdict(self.config)}
+        )
 
     async def stop(self) -> None:
         self._stopped = True
@@ -80,24 +81,15 @@ class RunSupervisor:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        state = self.run_store.load_state(self.run_id)
-        if state is not None:
-            self.run_store.save_state(self.run_id, state, status='stopped')
-        await self.events.publish(self.run_id, 'run_supervisor_stopped', {})
+        await self.events.transition_run_status(self.run_id, 'stopped', 'run_supervisor_stopped', {})
 
     async def pause(self) -> None:
         self._paused = True
-        state = self.run_store.load_state(self.run_id)
-        if state is not None:
-            self.run_store.save_state(self.run_id, state, status='paused')
-        await self.events.publish(self.run_id, 'run_paused', {})
+        await self.events.transition_run_status(self.run_id, 'paused', 'run_paused', {})
 
     async def resume(self) -> None:
         self._paused = False
-        state = self.run_store.load_state(self.run_id)
-        if state is not None:
-            self.run_store.save_state(self.run_id, state, status='running')
-        await self.events.publish(self.run_id, 'run_resumed', {})
+        await self.events.transition_run_status(self.run_id, 'running', 'run_resumed', {})
 
     async def recover_paused(self) -> None:
         """Restore a paused run recovered from persistence.
@@ -264,10 +256,7 @@ class RunSupervisor:
             if transition.state.stop_reason in ("completed", "error", "cancelled"):
                 self._stopped = True
                 status = "completed" if transition.state.stop_reason == "completed" else "stopped"
-                state = self.run_store.load_state(self.run_id)
-                if state is not None:
-                    self.run_store.save_state(self.run_id, state, status=status)
-                await self.events.publish(self.run_id, 'run_finished', {
+                await self.events.transition_run_status(self.run_id, status, 'run_finished', {
                     'stop_reason': transition.state.stop_reason,
                     'total_actions': transition.state.total_actions,
                     'cycle_id': transition.cycle_id,

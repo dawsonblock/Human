@@ -58,20 +58,9 @@ class EventManager:
         return self._locks[run_id]
 
     async def publish(self, run_id: str, event_type: str, payload: dict[str, Any]) -> RuntimeEvent:
-        """Persist a single event and deliver it to live subscribers.
-
-        Used for lifecycle events (pause, resume, stop, input_enqueued) that
-        are not part of a cycle.  Cycle events should go through
-        ``SQLiteRunStore.apply_cycle_transition`` + ``fan_out`` instead.
-
-        If the backing store exposes ``append_lifecycle_event`` (i.e. it is a
-        ``SQLiteBackend`` or compatible), that single-transaction method is used
-        to eliminate the ``get_last_seq()`` + ``append_event()`` race.
-        Otherwise the legacy two-step path is used under the per-run async lock.
-        """
+        """Persist a single event and deliver it to live subscribers."""
         if hasattr(self.store, "append_lifecycle_event"):
-            # Atomic single-transaction path — no async lock needed because
-            # SQLite BEGIN IMMEDIATE serialises concurrent writers.
+            # Atomic single-transaction path
             row = self.store.append_lifecycle_event(run_id, event_type, payload)
             event = RuntimeEvent(
                 run_id=row["run_id"],
@@ -92,6 +81,48 @@ class EventManager:
                     payload=payload,
                     created_at=created_at,
                 )
+        await self.live_bus.publish_live(event)
+        return event
+
+    async def transition_run_status(
+        self,
+        run_id: str,
+        status: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> RuntimeEvent:
+        """Atomically update run status in storage and deliver the lifecycle event."""
+        if hasattr(self.store, "transition_run_status_with_event"):
+            row = self.store.transition_run_status_with_event(run_id, status, event_type, payload)
+            event = RuntimeEvent(
+                run_id=row["run_id"],
+                seq=row["seq"],
+                type=row["type"],
+                payload=row["payload"],
+                created_at=row["created_at"],
+            )
+        else:
+            # Fallback for plain SQLiteRunStore
+            async with self._lock_for(run_id):
+                # Use dedicated status update if available
+                if hasattr(self.store, "update_run_status"):
+                    self.store.update_run_status(run_id, status)
+                else:
+                    # Very old store fallback
+                    state = self.store.load_state(run_id)
+                    if state:
+                        self.store.save_state(run_id, state, status=status)
+                
+                seq = self.store.get_last_seq(run_id) + 1
+                created_at = self.store.append_event(run_id, seq, event_type, payload)
+                event = RuntimeEvent(
+                    run_id=run_id,
+                    seq=seq,
+                    type=event_type,
+                    payload=payload,
+                    created_at=created_at,
+                )
+
         await self.live_bus.publish_live(event)
         return event
 

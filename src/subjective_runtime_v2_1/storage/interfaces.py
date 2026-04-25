@@ -46,6 +46,14 @@ class RunStore(Protocol):
         status: str | None = None,
     ) -> None: ...
 
+    def transition_run_status_with_event(
+        self,
+        run_id: str,
+        status: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
     # ── Atomic cycle commit ─────────────────────────────────────────
 
     def apply_cycle_transition(
@@ -84,3 +92,5 @@ class RunStore(Protocol):
     # ── Storage metadata ─────────────────────────────────────────────
 
     def get_storage_stats(self) -> dict[str, Any]: ...
+
+    def close(self) -> None: ...

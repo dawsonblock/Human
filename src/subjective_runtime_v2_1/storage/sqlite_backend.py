@@ -38,20 +38,41 @@ class SQLiteBackend(SQLiteRunStore):
     """SQLiteRunStore + migrations + atomic lifecycle events + artifact index."""
 
     def __init__(self, path: str | Path = "runtime.db") -> None:
-        # Delegate to parent which calls _init_db()
-        super().__init__(path)
+        self.raw_path = str(path)
+        if self.raw_path == ":memory:":
+            # Use shared memory URI to allow multiple connections to see the same tables.
+            # unique segment avoids collisions if multiple SQLiteBackend(":memory:") exist.
+            self.path = f"file:human_mem_{id(self)}?mode=memory&cache=shared"
+            self.uri = True
+            # Keep an anchor connection alive so the in-memory DB survives
+            self._anchor_conn = sqlite3.connect(self.path, uri=True, check_same_thread=False)
+        else:
+            self.path = str(path)
+            self.uri = False
+            self._anchor_conn = None
+
+        # Delegate to parent which calls _init_db() via self._conn()
+        super().__init__(self.path)
+
         # Enable WAL for file-backed DBs
-        if str(path) != ":memory:":
+        if not self.uri:
             with self._conn() as conn:
                 conn.execute("PRAGMA journal_mode = WAL")
+
         # Run migrations on top of the base schema
         with self._conn() as conn:
             apply_migrations(conn)
 
+    def close(self) -> None:
+        """Close the anchor connection for in-memory databases."""
+        if self._anchor_conn:
+            self._anchor_conn.close()
+            self._anchor_conn = None
+
     @contextmanager
     def _conn(self):
         """Override parent _conn to apply safety pragmas on every connection."""
-        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn = sqlite3.connect(self.path, uri=self.uri, check_same_thread=False)
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("PRAGMA busy_timeout = 5000")
@@ -78,12 +99,21 @@ class SQLiteBackend(SQLiteRunStore):
         now = time.time()
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
+
+            # 1. Verify run exists
+            row = conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            if not row:
+                conn.rollback()
+                raise KeyError(f"Run {run_id!r} does not exist. Cannot append lifecycle event.")
+
+            # 2. Compute next seq
             row = conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
             next_seq = int(row[0]) + 1
 
+            # 3. Insert
             conn.execute(
                 """
                 INSERT INTO run_events (run_id, seq, event_type, event_json, created_at)
@@ -138,15 +168,18 @@ class SQLiteBackend(SQLiteRunStore):
             try:
                 # 1. Update run state
                 if status is None:
-                    conn.execute(
+                    res = conn.execute(
                         'UPDATE runs SET state_json = ?, updated_at = ? WHERE run_id = ?',
                         (state_payload, now, run_id),
                     )
                 else:
-                    conn.execute(
+                    res = conn.execute(
                         'UPDATE runs SET state_json = ?, status = ?, updated_at = ? WHERE run_id = ?',
                         (state_payload, status, now, run_id),
                     )
+                
+                if res.rowcount == 0:
+                    raise KeyError(f"Run {run_id!r} does not exist. Cannot commit cycle transition.")
 
                 # 2. Append events (reuse parent logic but pass active connection)
                 committed_events = self.append_events_tx(conn, run_id, events_to_commit, now=now)
@@ -160,6 +193,86 @@ class SQLiteBackend(SQLiteRunStore):
                 raise
 
         return committed_events
+
+    def transition_run_status_with_event(
+        self,
+        run_id: str,
+        status: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically update run status and append a lifecycle event.
+        
+        This prevents status and lifecycle events from drifting if one write fails.
+        """
+        now = time.time()
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. Update status
+                res = conn.execute(
+                    "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                    (status, now, run_id)
+                )
+                if res.rowcount == 0:
+                    raise KeyError(f"Run {run_id!r} does not exist.")
+
+                # 2. Compute next seq
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                next_seq = int(row[0]) + 1
+
+                # 3. Insert event
+                conn.execute(
+                    """
+                    INSERT INTO run_events (run_id, seq, event_type, event_json, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (run_id, next_seq, event_type, json.dumps(payload), now),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        return {
+            "run_id": run_id,
+            "seq": next_seq,
+            "type": event_type,
+            "payload": payload,
+            "created_at": now,
+        }
+
+    def save_state(self, run_id: str, state: Any, status: str | None = None) -> None:
+        """Override save_state to mirror artifacts into the index atomically."""
+        from subjective_runtime_v2_1.state.store import state_to_dict
+        now = time.time()
+        state_payload = json.dumps(state_to_dict(state))
+
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if status is None:
+                    res = conn.execute(
+                        'UPDATE runs SET state_json = ?, updated_at = ? WHERE run_id = ?',
+                        (state_payload, now, run_id),
+                    )
+                else:
+                    res = conn.execute(
+                        'UPDATE runs SET state_json = ?, status = ?, updated_at = ? WHERE run_id = ?',
+                        (state_payload, status, now, run_id),
+                    )
+                
+                if res.rowcount == 0:
+                    raise KeyError(f"Run {run_id!r} does not exist.")
+
+                self._mirror_artifacts_tx(conn, run_id, state)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _mirror_artifacts_tx(self, conn: sqlite3.Connection, run_id: str, state: Any) -> None:
         """Upsert state.artifacts into run_artifacts using the provided transaction."""

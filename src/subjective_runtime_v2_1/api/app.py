@@ -99,6 +99,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         await scheduler.recover_runs()
         yield
+        db.close()
 
     app = FastAPI(title='subjective_runtime_v2_1', lifespan=lifespan)
     app.include_router(build_router(runtime_factory, scheduler, db, events, registry), prefix="/api")

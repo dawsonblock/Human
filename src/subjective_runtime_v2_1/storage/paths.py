@@ -48,7 +48,12 @@ class StoragePaths:
             raw_roots = allowed_roots
         elif "HUMAN_ALLOWED_ROOTS" in os.environ:
             # Use os.pathsep (":" on Unix, ";" on Windows)
-            raw_roots = [r for r in os.environ["HUMAN_ALLOWED_ROOTS"].split(os.pathsep) if r]
+            env_val = os.environ["HUMAN_ALLOWED_ROOTS"]
+            raw_roots = env_val.split(os.pathsep)
+            # Check for empty segments in the env var (e.g., "/tmp/a::/tmp/b")
+            for segment in raw_roots:
+                if not segment or not segment.strip():
+                    raise ValueError(f"HUMAN_ALLOWED_ROOTS contains an empty or whitespace segment: {env_val!r}")
         else:
             raw_roots = [str(self.data_dir / "workspace")]
 
@@ -58,7 +63,7 @@ class StoragePaths:
         resolved: list[Path] = []
         for r in raw:
             if not r or not r.strip():
-                continue
+                raise ValueError("Allowed root cannot be empty or whitespace-only.")
             # PRE-RESOLUTION TRAVERSAL REJECTION
             # Reject if the raw string contains ".." as a path segment
             if ".." in r.replace("\\", "/").split("/"):
