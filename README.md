@@ -1,108 +1,283 @@
 # Human Runtime
 
-> A bounded, auditable local cognitive runtime with an operator dashboard and optional LLM-powered planning via Ollama.
+> A bounded, auditable local cognitive runtime with an operator dashboard, approval gates, real-time SSE event streaming, and optional LLM-powered planning via Ollama.
+
+[![CI](https://github.com/dawsonblock/Human/actions/workflows/ci.yml/badge.svg)](https://github.com/dawsonblock/Human/actions/workflows/ci.yml)
+
+---
+
+## Table of Contents
+
+- [What is this?](#what-is-this)
+- [Architecture](#architecture)
+- [Feature Matrix](#feature-matrix)
+- [Quickstart](#quickstart)
+- [LLM Planning with Ollama](#llm-planning-with-ollama)
+- [Goal Types](#goal-types)
+- [Dashboard](#dashboard)
+- [API Reference](#api-reference)
+- [Security & Safety Model](#security--safety-model)
+- [Approval Flow](#approval-flow)
+- [Execution Authority Path](#execution-authority-path)
+- [Tool Reference](#tool-reference)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [CI/CD](#cicd)
+- [Configuration](#configuration)
+- [License](#license)
 
 ---
 
 ## What is this?
 
-**Human Runtime** is a local AI execution environment built for operators who want visibility and control over everything an agent does.
+**Human Runtime** is a local AI execution cockpit — not a chat app.
 
-It is **not** a chat app. It is an operator cockpit — you define goals, the system builds a plan, executes it step-by-step, and shows you everything in real time. You can pause, resume, approve, or deny any action at any point.
+You define goals. The system builds a plan. It executes each step through a bounded tool surface, streams every event to your dashboard in real time, and asks for your approval before any write operation. You have full pause/resume/stop control at all times.
 
-The execution model is deterministic by default. With [Ollama](https://ollama.com) installed, you unlock **Dynamic LLM Planning**: write any goal in plain English and let `llama3.2` generate the execution plan.
+The execution engine has two modes:
+
+| Mode | Description |
+|---|---|
+| **Deterministic** | Hard-coded plan templates selected by goal type. Fully predictable, no external dependencies. |
+| **LLM-powered** | Your goal description is sent to `llama3.2` via a local Ollama server. The model generates a step-by-step JSON plan that is validated against the tool registry before execution. |
+
+Both modes run entirely on your machine. No cloud API calls. No SaaS. No telemetry.
 
 ---
 
-## Features
+## Architecture
 
-| Capability | Status |
-|---|---|
-| Operator goal → bounded linear plan | ✅ |
-| Dynamic LLM planning via Ollama (`llama3.2`) | ✅ |
-| Real-time event stream (SSE) | ✅ |
-| React + Vite operator dashboard | ✅ |
-| Pause / Resume / Stop controls | ✅ |
-| Operator approval gate for sensitive actions | ✅ |
-| Artifact browser | ✅ |
-| Cognitive Graph visualizer | ✅ |
-| SQLite persistence (state, events, artifacts) | ✅ |
-| Crash recovery (resume paused/running runs after restart) | ✅ |
-| File read, write, preview, search | ✅ |
-| Shell execution | ❌ Disabled by default |
-| SaaS integrations / browser automation | ❌ Out of scope |
-| Production hardening / deployment | ❌ Not claimed |
+```
+Operator (Browser)
+      │
+      ▼
+React Dashboard ──SSE──────────────────────────────────────────┐
+      │                                                         │
+      ▼                                                         │
+FastAPI  (/api/*)                                               │
+      │                                                         │
+      ├── POST /runs ──► RuntimeScheduler                       │
+      │                       │                                 │
+      │                       ▼                                 │
+      │                 RunSupervisor                           │
+      │                 ┌─────────────────────────────┐        │
+      │                 │  _cycle_lock (asyncio.Lock)  │        │
+      │                 │                             │        │
+      │                 │  RuntimeCore.cycle()        │        │
+      │                 │    ├── GoalDirectedPlanner   │        │
+      │                 │    │     ├── Deterministic   │        │
+      │                 │    │     └── LLM (Ollama)    │        │
+      │                 │    ├── ActionGate (gating)   │        │
+      │                 │    ├── Executor (tools)      │        │
+      │                 │    └── CycleTransition       │        │
+      │                 │                             │        │
+      │                 │  SQLiteRunStore             │        │
+      │                 │    └── apply_cycle_transition│        │
+      │                 │         (atomic commit)      │        │
+      │                 └─────────────────────────────┘        │
+      │                         │                               │
+      │                         ▼                               │
+      │                   EventManager                          │
+      │                   └── publish_persisted_batch ──────────┘
+      │
+      ├── POST /runs/{id}/approve ──► RunSupervisor.approve_action()
+      │                                └── _mutate_state() [atomic]
+      │
+      └── GET /runs/{id}/events ──► SSE StreamingResponse
+```
+
+### Key Design Principles
+
+- **Single execution authority**: All state mutations go through `RunSupervisor._cycle_lock` or `_mutate_state()`. Routes never mutate state directly.
+- **Atomic commits**: `SQLiteRunStore.apply_cycle_transition()` writes state and all events in a single SQLite transaction.
+- **Bounded tool surface**: Eight tools, all with explicit root-path enforcement, size caps, and structured `ToolResult` error returns.
+- **Real timeout enforcement**: Tools execute in a `ThreadPoolExecutor` with a hard `future.result(timeout=N)` — not a post-hoc elapsed check.
+- **Schema-validated LLM plans**: Every step generated by the LLM is checked against the tool registry before it enters the plan. Unknown tools and wrong argument keys are rejected.
+
+---
+
+## Feature Matrix
+
+| Capability | Status | Notes |
+|---|---|---|
+| Operator goal → bounded linear plan | ✅ | |
+| Deterministic plan templates | ✅ | 6 built-in goal types |
+| LLM planning via Ollama (`llama3.2`) | ✅ | With schema validation + 20s timeout |
+| Real-time SSE event stream | ✅ | Persisted, resumable |
+| React + Vite operator dashboard | ✅ | Dark cockpit UI |
+| Run browser (list, search, select) | ✅ | |
+| Pause / Resume / Stop controls | ✅ | |
+| Operator approval gate | ✅ | Atomic under `_cycle_lock` |
+| Cognitive Graph visualizer | ✅ | Goals, plans, tensions |
+| Artifact browser | ✅ | Click to inspect full content |
+| SQLite persistence | ✅ | State, events, approvals, artifacts |
+| Crash recovery | ✅ | Resume paused/running runs after restart |
+| Real tool timeout enforcement | ✅ | `ThreadPoolExecutor` + `future.result(timeout)` |
+| File read (hardened) | ✅ | Existence, is_file, 1MB cap, OSError wrapping |
+| File write (hardened) | ✅ | Type checks, 1MB cap, OSError wrapping |
+| Shell execution | ❌ | Disabled by default. Env var `ALLOW_DEV_TERMINAL=1` required. |
+| Network access | ❌ | No outbound requests from tools |
+| Multi-agent orchestration | ❌ | Out of scope |
+| SaaS integrations | ❌ | Out of scope |
 
 ---
 
 ## Quickstart
 
-```bash
-# 1. Install Python dependencies
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+### Prerequisites
 
-# 2. Build the frontend
+- Python ≥ 3.12
+- Node.js ≥ 18 (for the dashboard)
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/dawsonblock/Human.git
+cd Human
+
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+### 2. Build the frontend
+
+```bash
 cd frontend
 npm install
 npm run build
 cd ..
-
-# 3. Run the test suite (148 tests)
-pytest
-
-# 4. Start the server
-uvicorn subjective_runtime_v2_1.api.app:app --reload
-# → Open http://localhost:8000
 ```
 
-### Enable LLM Planning (optional but recommended)
+### 3. Run the test suite
 
 ```bash
-# Install Ollama
-brew install ollama        # macOS
-ollama serve               # Start the server
-ollama pull llama3.2       # Pull the model (~2GB)
+pytest                      # 174 tests, all passing
 ```
 
-Once running, the dashboard will show a **LLM Ready** indicator. Select **Dynamic LLM Plan** in the Goal Composer and write any goal in plain English.
+### 4. Start the server
+
+```bash
+uvicorn subjective_runtime_v2_1.api.app:app --reload
+```
+
+Open **http://localhost:8000** — the React dashboard is served at root.
+
+### 5. Run a development UI (hot reload)
+
+```bash
+cd frontend
+npm run dev                 # http://localhost:3000
+```
+
+The Vite dev server proxies `/api` to `http://localhost:8000`.
+
+---
+
+## LLM Planning with Ollama
+
+The **Dynamic LLM Plan** mode lets you write any goal in plain English. Ollama runs `llama3.2` locally and generates a structured execution plan.
+
+### Install Ollama
+
+```bash
+# macOS
+brew install ollama
+
+# Or download from https://ollama.com
+```
+
+### Start and pull the model
+
+```bash
+ollama serve               # Start the background server
+ollama pull llama3.2       # Download the model (~2 GB)
+```
+
+### Use it in the dashboard
+
+1. Confirm the **LLM Ready** indicator (violet pulsing dot) is active in the header bar.
+2. Click **New Cognitive Run**.
+3. Select **Dynamic LLM Plan** from the Tactical Mode dropdown.
+4. Write any goal in plain English, e.g.:
+   - `List the src/ directory and write a markdown summary of each subdirectory`
+   - `Search for all TODO comments in the codebase and record them in memory`
+5. Click **Initialize Thread**.
+
+### How validation works
+
+The planner sends your goal to `llama3.2` with a strict system prompt that lists every available tool and its **exact** required argument keys. The response is parsed as JSON and each step is validated:
+
+- Unknown tool names → step rejected, logged, skipped
+- Wrong argument keys (e.g. `path`/`query` instead of `directory`/`pattern` for `search_files`) → step rejected
+- If all steps are rejected → falls back to the deterministic generic planner
+- Ollama timeout (20 seconds) → falls back immediately, loop does not stall
 
 ---
 
 ## Goal Types
 
-| Mode | What it does |
+### Deterministic Templates
+
+| Type | Steps Generated | Notes |
+|---|---|---|
+| `operator_request` | `echo` + `memory_write` | Acknowledges and records goal |
+| `inspect_workspace` | `list_directory` | Lists allowed workspace root |
+| `summarize_files` | `list_directory` + `append_note` | Writes `summary.md` |
+| `extract_facts` | `list_directory` + `memory_write` | Records extraction intent to episodic memory |
+| `draft_note` | `append_note` | Appends to `draft.md` |
+| `propose_write` | `write_file_preview` + `file_write` | Stages preview, gates on approval before writing |
+
+### LLM Mode
+
+| Type | Behavior |
 |---|---|
-| `dynamic_llm` | Sends your goal to `llama3.2`. The LLM generates the step-by-step plan. Works with any natural language goal. |
-| `operator_request` | Generic: echoes the goal and records it to memory |
-| `inspect_workspace` | Lists the allowed workspace directory |
-| `summarize_files` | Lists files and writes a summary note |
-| `extract_facts` | Lists files and records extraction intent to episodic memory |
-| `draft_note` | Appends a draft to `draft.md` in the workspace |
-| `propose_write` | Stages a write preview, then requires operator approval before writing |
+| `dynamic_llm` | Sends description to `llama3.2`. Plan is validated against tool registry. Falls back to generic on failure. |
+| Any unrecognised type | Same as `dynamic_llm` if Ollama is running, otherwise generic fallback. |
 
 ---
 
 ## Dashboard
 
-Start the dev server for the UI:
+The operator dashboard is a single-page React application served at `http://localhost:8000`.
 
-```bash
-cd frontend
-npm run dev
-# → http://localhost:3000
+### Layout
+
 ```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Header: Run title, goal description, Live Sync badge, LLM badge     │
+├──────────────┬──────────────────────────────┬───────────────────────┤
+│              │                              │                       │
+│  Left Panel  │     Center Panel             │   Right Panel         │
+│              │                              │                       │
+│  Run Browser │  ┌─ Tabs ─────────────────┐ │  State Inspector      │
+│  (search,    │  │ Timeline │ Graph │ Help │ │  (hypotheses, memory) │
+│   list,      │  └─────────────────────────┘ │                       │
+│   select)    │                              │  Approval Queue       │
+│              │  Event feed / Cognitive      │  (approve / deny)     │
+│  Runtime     │  graph / Help guide          │                       │
+│  Health      │                              │  Artifact Browser     │
+│              │                              │  (click to inspect)   │
+│  Plan View   │                              │                       │
+│              │                              │                       │
+├──────────────┴──────────────────────────────┴───────────────────────┤
+│  New Cognitive Run button                                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Panel Guide
 
 | Panel | Purpose |
 |---|---|
-| **Left sidebar** | Run browser — list, search, and select cognitive threads |
-| **Center — Timeline** | Live SSE event feed. Click any event to inspect its full JSON payload |
-| **Center — Graph** | Cognitive state visualizer (goals, plans, tensions, focus candidates) |
-| **Center — Help** | Step-by-step usage guide built into the UI |
-| **Right — Inspector** | Internal state: hypotheses, working memory, self-model fields |
-| **Right — Approvals** | Operator approval queue for gated tool calls |
-| **Right — Artifacts** | Clickable list of all artifacts produced by the selected run |
+| **Run Browser (Left)** | Search and select runs. Runs persist across server restarts. |
+| **Runtime Health (Left)** | Uncertainty load, continuity health, goal drift, overload pressure — live regulation metrics. |
+| **Plan View (Left)** | Current active plan with step-by-step status (pending / running / done / failed). |
+| **Timeline (Center)** | Live SSE event feed. Every cycle, tool call, approval request, and plan update appears here. Click any event to inspect its full JSON payload. |
+| **Cognitive Graph (Center)** | Visual node graph of the agent's internal state: goals, plans, tensions, focus candidates. |
+| **Help (Center)** | Built-in operator guide — step-by-step usage instructions, LLM mode walkthrough. |
+| **State Inspector (Right)** | Expandable view of internal arrays: hypotheses, working memory, world model, self model. |
+| **Approval Queue (Right)** | Pending tool calls requiring operator sign-off. Review arguments, then Approve or Deny. |
+| **Artifact Browser (Right)** | All artifacts produced by the selected run. Click to read full content in a modal. |
 
 ---
 
@@ -110,68 +285,336 @@ npm run dev
 
 All endpoints are prefixed with `/api`.
 
-| Method | Path | Purpose |
+### Runs
+
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | Serves the React dashboard |
-| `POST` | `/api/runs` | Create a run (with optional goal) |
-| `GET` | `/api/runs` | List all runs |
-| `GET` | `/api/runs/{id}/summary` | Compact run status, progress, approvals |
-| `GET` | `/api/runs/{id}/plan` | Active plan with step statuses |
-| `GET` | `/api/runs/{id}/state/compact` | Cognitive state + regulation health |
-| `GET` | `/api/runs/{id}/artifacts` | Artifacts produced by this run |
-| `GET` | `/api/runs/{id}/events` | SSE stream of all events |
-| `POST` | `/api/runs/{id}/pause` | Pause execution |
-| `POST` | `/api/runs/{id}/resume` | Resume execution |
-| `DELETE` | `/api/runs/{id}` | Stop and clean up |
-| `POST` | `/api/runs/{id}/approve` | Approve a pending gated action |
-| `POST` | `/api/runs/{id}/deny` | Deny a pending gated action |
-| `GET` | `/api/approvals/pending` | All pending approvals across runs |
-| `GET` | `/api/llm/status` | Ollama health check |
+| `POST` | `/api/runs` | Create a new run. Body: `{inputs, config, goal}`. |
+| `GET` | `/api/runs` | List all runs with metadata. |
+| `GET` | `/api/runs/{id}` | Get run metadata. |
+| `GET` | `/api/runs/{id}/summary` | Compact status, progress, approval count. |
+| `GET` | `/api/runs/{id}/state` | Full agent state snapshot. |
+| `GET` | `/api/runs/{id}/state/compact` | Cognitive state + regulation health fields. |
+| `GET` | `/api/runs/{id}/goal` | Currently active goal. |
+| `GET` | `/api/runs/{id}/plan` | Active plan with all step statuses. |
+| `GET` | `/api/runs/{id}/artifacts` | Artifacts produced by this run. |
+| `GET` | `/api/runs/{id}/events` | SSE stream of all events (supports `?after_seq=N`). |
+| `GET` | `/api/runs/{id}/events/recent` | Last N events as JSON (supports `?limit=N`). |
+| `POST` | `/api/runs/{id}/input` | Enqueue external input into the run. |
+| `POST` | `/api/runs/{id}/pause` | Pause execution. |
+| `POST` | `/api/runs/{id}/resume` | Resume a paused run. |
+| `DELETE` | `/api/runs/{id}` | Stop and clean up a run. |
+
+### Approvals
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/runs/{id}/approve` | Approve a pending gated action by `action_id`. |
+| `POST` | `/api/runs/{id}/deny` | Deny a pending gated action by `action_id`. |
+| `GET` | `/api/approvals/pending` | All pending approvals across all active runs. |
+
+### Runtime
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/runtime/tools` | List all registered tools and descriptions. |
+| `GET` | `/api/runtime/config-defaults` | Default `RunConfig` values. |
+| `GET` | `/api/llm/status` | Ollama health check — `{available, status}`. |
+
+### Create Run Body
+
+```json
+{
+  "inputs": {},
+  "config": {
+    "tick_interval_sec": 0.2,
+    "idle_enabled": true,
+    "auto_sleep_when_stable": true,
+    "stability_threshold": 0.92,
+    "max_cycles": 0,
+    "max_actions": 10,
+    "max_replans": 3
+  },
+  "goal": {
+    "type": "dynamic_llm",
+    "description": "List the src/ folder and summarise each subdirectory"
+  }
+}
+```
 
 ---
 
-## Safety Model
+## Security & Safety Model
 
-- All file operations are bounded by `allowed_roots` (default: `.`)
-- `file_write` requires explicit operator approval before execution
-- `write_file_preview` stages content for review without writing
-- Risky tools are gated by `ActionGate` pre-execution
-- **No shell execution.** The `pty.fork()` terminal is disabled by default. It can only be re-enabled in development with `ALLOW_DEV_TERMINAL=1` — do not set this in any shared or networked environment.
-- No network access, no process spawning, no unconstrained automation
+### What is bounded
+
+- All file operations (read, write, search, append) resolve paths and check that they are inside `allowed_roots` before doing anything.
+- `allowed_roots` defaults to the current working directory.
+- Any path traversal attempt returns a structured `ToolResult(ok=False)` — no exception propagates.
+
+### File size limits
+
+| Tool | Limit |
+|---|---|
+| `file_read` | 1 MB read cap |
+| `file_write` | 1 MB write cap |
+| `append_note` | 100 KB per append |
+| `search_files` | 1 MB per file skipped if larger |
+
+### Tool execution timeout
+
+Every tool runs in a `ThreadPoolExecutor` thread. `future.result(timeout=N)` enforces a hard wall-clock limit. The default is 30 seconds; individual tools can override via `ToolSpec.timeout_sec`. A timed-out tool returns a structured error — it does not stall the supervisor loop.
+
+### Shell access
+
+The WebSocket terminal endpoint (`/terminal`) is **disabled by default**. It will immediately close the WebSocket with code 1008 unless the environment variable `ALLOW_DEV_TERMINAL=1` is set.
+
+> ⚠️ **Never set `ALLOW_DEV_TERMINAL=1` in a shared, networked, or production environment.** It grants unrestricted interactive bash access.
+
+### No network access from tools
+
+No tool makes outbound HTTP requests. The `http_get` tool exists in the codebase but is not registered in the default tool registry. Ollama is a planning-only dependency — it is not called from within the execution loop after a plan is built.
+
+---
+
+## Approval Flow
+
+Some tools are marked `requires_confirmation=True` in their `ToolSpec` (e.g. `file_write`). When the planner selects one:
+
+1. An `ApprovalRequest` is created with `status=pending` and persisted to SQLite.
+2. An `approval_requested` event is emitted to SSE subscribers.
+3. The plan status changes to `blocked`. The run loop continues ticking but skips execution.
+4. The **Approval Queue** panel in the dashboard shows the pending action with its tool name, arguments, and reason.
+5. Operator clicks **Approve** or **Deny**.
+
+### On Approve
+
+- `RunSupervisor.approve_action()` acquires `_cycle_lock`.
+- Atomically: marks the approval `approved`, unblocks the plan (`status → active`), clears `stop_reason`.
+- Emits `approval_granted` event.
+- Re-queues `{_approval_granted: action_id}` to the input queue.
+- Next cycle executes the approved tool exactly once.
+
+### On Deny
+
+- `RunSupervisor.deny_action()` acquires `_cycle_lock`.
+- Atomically: marks the approval `denied`, marks the plan `failed`, sets `stop_reason=blocked`, sets `run_outcome`.
+- Emits `approval_denied` event.
+- The run terminates with `stop_reason=blocked`.
+
+> Both approve and deny mutations happen under `_cycle_lock` — the same lock that guards the execution cycle. No race condition is possible.
 
 ---
 
 ## Execution Authority Path
 
 ```
-operator input
-  → input_queue
-  → RunSupervisor (_cycle_lock)
-    → RuntimeCore.cycle()          # pure, no side effects
-    → CycleTransition              # goal / plan / artifact / event drafts
-    → SQLiteRunStore.apply()       # atomic write (state + events)
-    → EventManager.publish()       # live SSE fan-out to subscribers
+Operator input (HTTP or UI)
+  └─► input_queue (asyncio.Queue)
+        └─► RunSupervisor._run_loop()
+              └─► async with _cycle_lock:
+                    RuntimeCore.cycle()           ← pure, no side effects
+                      ├── GoalDirectedPlanner     ← build or select plan
+                      ├── ActionGate              ← gate check
+                      ├── Executor                ← invoke tool (thread pool, timeout)
+                      └── CycleTransition         ← draft new state + events
+                    SQLiteRunStore.apply_cycle_transition()   ← atomic write
+              └─► EventManager.publish_persisted_batch()      ← SSE fan-out
 ```
+
+**Approval mutations** follow the same lock:
+
+```
+POST /api/runs/{id}/approve
+  └─► RunSupervisor.approve_action()
+        └─► async with _cycle_lock:
+              load state → mutate approval + unblock plan → apply_cycle_transition()
+        └─► EventManager.publish_persisted_batch()
+        └─► input_queue.put({_approval_granted: action_id})
+```
+
+---
+
+## Tool Reference
+
+| Tool | Arguments | Side Effects | Requires Approval |
+|---|---|---|---|
+| `list_directory` | `path: str` | None | No |
+| `file_read` | `path: str` | None | No |
+| `file_write` | `path: str`, `text: str` | Writes file | **Yes** |
+| `write_file_preview` | `path: str`, `text: str` | None (preview only) | No |
+| `append_note` | `path: str`, `text: str` | Appends to file | No |
+| `search_files` | `directory: str`, `pattern: str`, `glob?: str` | None | No |
+| `memory_write` | `kind: str`, `payload: dict` | Writes to memory store | No |
+| `echo` | `message: str` | None | No |
+
+### Tool Error Handling
+
+All tools return a `ToolResult` dataclass:
+
+```python
+@dataclass
+class ToolResult:
+    ok: bool
+    output: dict
+    error: str | None = None
+    memory_writes: list = field(default_factory=list)
+    state_delta: dict = field(default_factory=dict)
+    observations: list = field(default_factory=dict)
+    artifacts: list = field(default_factory=list)
+    latency_ms: float = 0.0
+```
+
+Errors are **never** propagated as uncaught exceptions from tool `invoke()` methods. Every error path returns `ToolResult(ok=False, error="...")`.
 
 ---
 
 ## Project Structure
 
 ```
-Human-main/
-├── src/subjective_runtime_v2_1/
-│   ├── api/              # FastAPI routes + SSE + schemas
-│   ├── runtime/          # Supervisor, core loop, scheduler, events
-│   ├── planning/         # Goal planner (deterministic + LLM hybrid)
-│   ├── action/           # Tool registry, gate, executor, approvals
-│   ├── state/            # SQLite store, state models
-│   ├── engines/          # Homeostasis, hypothesis, narrative, conflict
-│   ├── memory/           # Working, episodic, semantic, procedural
-│   ├── tension/          # Tension detection engine
-│   └── self_model/       # Drift tracking, self-model
-├── frontend/             # React + Vite + Tailwind operator dashboard
-└── tests/                # 148 tests
+Human/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                  # Python + frontend CI
+├── src/
+│   └── subjective_runtime_v2_1/
+│       ├── api/
+│       │   ├── app.py              # FastAPI app factory
+│       │   ├── routes.py           # All HTTP endpoints
+│       │   ├── schemas.py          # Pydantic request/response models
+│       │   └── static/             # Built frontend assets (served at /)
+│       ├── runtime/
+│       │   ├── core.py             # RuntimeCore.cycle() — pure cognitive cycle
+│       │   ├── supervisor.py       # RunSupervisor — loop, pause/resume, approvals
+│       │   ├── scheduler.py        # RuntimeScheduler — manages multiple runs
+│       │   ├── events.py           # EventManager + SSE bus
+│       │   ├── loop.py             # Loop utilities
+│       │   └── transition.py       # CycleTransition dataclass
+│       ├── planning/
+│       │   ├── goal_planner.py     # GoalDirectedPlanner (deterministic + LLM)
+│       │   ├── planner.py          # Re-plan logic
+│       │   ├── policies.py         # Planning policies
+│       │   └── scoring.py          # Focus candidate scoring
+│       ├── action/
+│       │   ├── executor.py         # Tool executor (ThreadPoolExecutor timeout)
+│       │   ├── gate.py             # ActionGate — pre-execution gating
+│       │   ├── registry.py         # ToolRegistry
+│       │   ├── approvals.py        # ApprovalRequest management
+│       │   ├── contracts.py        # ToolCall, ToolResult, ToolSpec
+│       │   ├── context.py          # ExecutionContext
+│       │   └── tools/
+│       │       ├── list_directory.py
+│       │       ├── file_read.py    # Hardened: existence, is_file, 1MB cap
+│       │       ├── file_write.py   # Hardened: type checks, 1MB cap
+│       │       ├── write_file_preview.py
+│       │       ├── append_note.py  # 100KB cap
+│       │       ├── search_files.py # directory+pattern schema, 1MB/file cap
+│       │       ├── memory_write.py
+│       │       └── echo.py
+│       ├── state/
+│       │   ├── models.py           # AgentStateV2_1, Goal, Plan, PlanStep, etc.
+│       │   ├── sqlite_store.py     # SQLiteRunStore — atomic apply_cycle_transition
+│       │   └── store.py            # InMemoryStateStore (runtime buffer)
+│       ├── engines/                # Homeostasis, hypothesis, conflict, narrative…
+│       ├── memory/                 # Working, episodic, semantic, procedural memory
+│       ├── tension/                # Tension detection engine
+│       ├── modules/                # Language, prediction, reflection, self-check…
+│       ├── self_model/             # Drift tracking, self-model
+│       ├── workspace/              # Attention, workspace management
+│       └── util/                   # IDs, timestamps, logging
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx                 # Main operator dashboard
+│   │   ├── CognitiveGraph.tsx      # XY-Flow cognitive graph
+│   │   ├── api/
+│   │   │   ├── client.ts           # Typed API client
+│   │   │   └── events.ts           # SSE subscription
+│   │   └── index.css               # Global styles
+│   ├── vite.config.ts              # Vite + /api proxy
+│   └── package.json
+├── tests/                          # 174 tests
+│   ├── test_compact_state_regression.py
+│   ├── test_llm_planner_validation.py
+│   ├── test_file_tool_hardening.py
+│   └── …46 test files total
+├── pyproject.toml                  # Python package + deps (includes ollama>=0.3.0)
+└── README.md
 ```
+
+---
+
+## Testing
+
+```bash
+# Full suite
+pytest
+
+# Specific areas
+pytest tests/test_llm_planner_validation.py   # LLM schema validation
+pytest tests/test_file_tool_hardening.py      # File tool safety
+pytest tests/test_compact_state_regression.py # Compact state endpoint
+pytest tests/test_runtime_authority_gates.py  # Approval authority
+pytest --tb=short -q                          # Quiet output
+```
+
+**174 tests, 0 failures.**
+
+### Test coverage areas
+
+| Area | Test File(s) |
+|---|---|
+| LLM planner validation (valid plan, unknown tool, wrong args, malformed JSON, timeout fallback) | `test_llm_planner_validation.py` |
+| File tool safety (outside-root, missing file, dir-as-file, large file, binary content) | `test_file_tool_hardening.py` |
+| Compact state regression (`last_action`/`last_outcome` as dict) | `test_compact_state_regression.py` |
+| Approval authority (approve/deny, plan unblock, exact-once execution) | `test_runtime_authority_gates.py` |
+| Terminal disabled by default | `test_terminal_disabled_by_default.py` |
+| API prefix and static UI | `test_api_prefix_static_ui.py` |
+| Full runtime cycle, supervisor, scheduler | Various |
+
+---
+
+## CI/CD
+
+GitHub Actions runs on every push and pull request to `main`:
+
+```yaml
+jobs:
+  python:   # Python 3.12 — pip install -e ".[dev]", compileall, pytest
+  frontend: # Node 20     — npm ci, tsc -b, vite build
+```
+
+Both jobs must pass before merge.
+
+---
+
+## Configuration
+
+### Server
+
+```bash
+uvicorn subjective_runtime_v2_1.api.app:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --reload
+```
+
+### Run Config (per-run, passed in POST body)
+
+| Field | Default | Description |
+|---|---|---|
+| `tick_interval_sec` | `0.2` | Base cycle interval in seconds |
+| `idle_enabled` | `true` | Whether to tick when no inputs are queued |
+| `auto_sleep_when_stable` | `true` | Slow down ticking when stable (up to 1s) |
+| `stability_threshold` | `0.92` | Continuity health above which system is "stable" |
+| `max_cycles` | `0` | Max cycles before stopping (0 = unlimited) |
+| `max_actions` | `0` | Max tool executions before stopping (0 = unlimited) |
+| `max_replans` | `3` | Max re-planning attempts on failure |
+
+### Environment Variables
+
+| Variable | Effect |
+|---|---|
+| `ALLOW_DEV_TERMINAL=1` | Enables the WebSocket bash terminal. **Development only.** |
 
 ---
 
