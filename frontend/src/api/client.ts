@@ -74,7 +74,9 @@ export const client = {
   getState: (id: string) => fetchJSON(`${API_BASE}/runs/${id}/state/compact`),
   getApprovals: () => fetchJSON(`${API_BASE}/approvals/pending`),
   getLLMStatus: () => fetchJSON(`${API_BASE}/llm/status`),
-  
+  getStorageStatus: () => fetchJSON(`${API_BASE}/runtime/storage`),
+  exportRun: (id: string) => fetchJSON(`${API_BASE}/runs/${id}/export`),
+
   createRun: (payload: Record<string, unknown>) => fetchJSON(`${API_BASE}/runs`, {
     method: 'POST',
     body: JSON.stringify(payload)

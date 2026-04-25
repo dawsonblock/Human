@@ -63,17 +63,35 @@ class EventManager:
         Used for lifecycle events (pause, resume, stop, input_enqueued) that
         are not part of a cycle.  Cycle events should go through
         ``SQLiteRunStore.apply_cycle_transition`` + ``fan_out`` instead.
+
+        If the backing store exposes ``append_lifecycle_event`` (i.e. it is a
+        ``SQLiteBackend`` or compatible), that single-transaction method is used
+        to eliminate the ``get_last_seq()`` + ``append_event()`` race.
+        Otherwise the legacy two-step path is used under the per-run async lock.
         """
-        async with self._lock_for(run_id):
-            seq = self.store.get_last_seq(run_id) + 1
-            created_at = self.store.append_event(run_id, seq, event_type, payload)
+        if hasattr(self.store, "append_lifecycle_event"):
+            # Atomic single-transaction path — no async lock needed because
+            # SQLite BEGIN IMMEDIATE serialises concurrent writers.
+            row = self.store.append_lifecycle_event(run_id, event_type, payload)
             event = RuntimeEvent(
-                run_id=run_id,
-                seq=seq,
-                type=event_type,
-                payload=payload,
-                created_at=created_at,
+                run_id=row["run_id"],
+                seq=row["seq"],
+                type=row["type"],
+                payload=row["payload"],
+                created_at=row["created_at"],
             )
+        else:
+            # Legacy two-step fallback (plain SQLiteRunStore)
+            async with self._lock_for(run_id):
+                seq = self.store.get_last_seq(run_id) + 1
+                created_at = self.store.append_event(run_id, seq, event_type, payload)
+                event = RuntimeEvent(
+                    run_id=run_id,
+                    seq=seq,
+                    type=event_type,
+                    payload=payload,
+                    created_at=created_at,
+                )
         await self.live_bus.publish_live(event)
         return event
 

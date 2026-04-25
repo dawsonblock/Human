@@ -1,3 +1,12 @@
+"""FastAPI application factory for the Human Runtime.
+
+Configuration is resolved in priority order:
+  1. Explicit keyword arguments to ``create_app()``
+  2. Environment variables (``HUMAN_DATA_DIR``, ``HUMAN_DB_PATH``, ``HUMAN_ALLOWED_ROOTS``)
+  3. Defaults (``./data/runtime.db``, ``./data/workspace``)
+
+See ``storage/paths.py`` for full env var documentation.
+"""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -14,7 +23,8 @@ from subjective_runtime_v2_1.api.routes import build_router
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager, LiveEventBus
 from subjective_runtime_v2_1.runtime.scheduler import RuntimeScheduler
-from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.storage.paths import StoragePaths
+from subjective_runtime_v2_1.storage.sqlite_backend import SQLiteBackend
 from subjective_runtime_v2_1.state.store import InMemoryStateStore
 
 _STATIC_DIR = Path(__file__).parent / 'static'
@@ -28,7 +38,7 @@ class StateSeeder:
     authority for committing state+events via
     ``SQLiteRunStore.apply_cycle_transition()``.
     """
-    def __init__(self, db: SQLiteRunStore) -> None:
+    def __init__(self, db: SQLiteBackend) -> None:
         self.db = db
 
     def load(self, run_id: str):
@@ -45,9 +55,31 @@ class StateSeeder:
         )
 
 
-def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = None) -> FastAPI:
-    roots = allowed_roots or ['.']
-    db = SQLiteRunStore(db_path)
+def create_app(
+    db_path: str | None = None,
+    allowed_roots: list[str] | None = None,
+) -> FastAPI:
+    """Create and configure the Human Runtime FastAPI application.
+
+    Parameters
+    ----------
+    db_path:
+        Explicit SQLite database path.  If ``None``, resolved from
+        ``HUMAN_DB_PATH`` env var or ``{HUMAN_DATA_DIR}/runtime.db``.
+    allowed_roots:
+        Explicit list of allowed tool root directories.  If ``None``,
+        resolved from ``HUMAN_ALLOWED_ROOTS`` env var or a default
+        workspace directory inside the data dir.
+    """
+    # Resolve paths from env vars / defaults
+    paths = StoragePaths(
+        db_path=db_path,
+        allowed_roots=allowed_roots,
+    )
+    paths.ensure_data_dir()
+
+    db = SQLiteBackend(paths.db_path)
+    roots = paths.allowed_roots_str
     events = EventManager(db, LiveEventBus())
     registry = build_tool_registry(allowed_roots=roots)
 
@@ -82,6 +114,7 @@ def create_app(db_path: str = 'runtime.db', allowed_roots: list[str] | None = No
     app.state.scheduler = scheduler
     app.state.db = db
     app.state.events = events
+    app.state.paths = paths
     return app
 
 

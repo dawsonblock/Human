@@ -89,10 +89,14 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
 
     @router.get('/runs/{run_id}/artifacts')
     async def list_artifacts(run_id: str):
-        state = db.load_state(run_id)
-        if state is None:
+        if db.get_run(run_id) is None:
             raise HTTPException(status_code=404, detail='run not found')
-        return {'artifacts': [asdict(a) for a in state.artifacts]}
+        # Use the artifact index when available (SQLiteBackend), fall back to
+        # reading state.artifacts from the state blob for older databases.
+        if hasattr(db, 'list_artifacts'):
+            return {'artifacts': db.list_artifacts(run_id)}
+        state = db.load_state(run_id)
+        return {'artifacts': [asdict(a) for a in (state.artifacts if state else [])]}
 
     @router.get('/runs/{run_id}/summary')
     async def get_summary(run_id: str):
@@ -222,6 +226,30 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
     @router.get('/runtime/config-defaults')
     async def get_config_defaults():
         return RunConfigModel().model_dump()
+
+    @router.get('/runtime/storage')
+    async def get_storage_status():
+        """Return storage backend health and aggregate counts for the dashboard."""
+        if hasattr(db, 'get_storage_stats'):
+            return db.get_storage_stats()
+        # Fallback for plain SQLiteRunStore
+        return {
+            'backend': 'sqlite',
+            'db_path': getattr(db, 'path', 'unknown'),
+            'schema_version': 0,
+            'run_count': len(db.list_runs()),
+            'event_count': None,
+            'artifact_count': None,
+        }
+
+    @router.get('/runs/{run_id}/export')
+    async def export_run(run_id: str):
+        """Return a complete JSON export bundle for the given run."""
+        if db.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail='run not found')
+        if hasattr(db, 'export_run_bundle'):
+            return db.export_run_bundle(run_id)
+        raise HTTPException(status_code=501, detail='export not supported by current storage backend')
 
     @router.get('/runs/{run_id}/events/recent')
     async def get_recent_events(run_id: str, limit: int = 200):

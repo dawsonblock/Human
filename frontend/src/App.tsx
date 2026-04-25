@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
   const [activeTab, setActiveTab] = useState<'timeline' | 'graph' | 'help'>('timeline');
   const [llmConnected, setLlmConnected] = useState<boolean | null>(null);
+  const [storageStats, setStorageStats] = useState<Record<string, unknown> | null>(null);
   
   const timelineRef = useRef<HTMLDivElement>(null);
 
@@ -52,6 +53,12 @@ const App: React.FC = () => {
         setLlmConnected((llmData as { available: boolean }).available);
       } catch {
         setLlmConnected(false);
+      }
+      try {
+        const storageData = await client.getStorageStatus();
+        setStorageStats(storageData as Record<string, unknown>);
+      } catch {
+        // non-critical
       }
     } catch (e) {
       console.error(e);
@@ -275,6 +282,40 @@ const App: React.FC = () => {
                       <HealthMetric label="Goal Drift" value={state?.regulation?.goal_drift} color="orange" />
                       <HealthMetric label="Overload Pressure" value={state?.regulation?.overload_pressure} color="red" />
                    </div>
+                </Card>
+
+                {/* Storage Card */}
+                <Card title="Storage" icon={<Database className="w-3.5 h-3.5" />}>
+                  {storageStats ? (
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[0.65rem] text-[#64748b]">Backend</span>
+                        <span className="text-[0.65rem] font-mono font-bold text-[#94a3b8] uppercase">{String(storageStats.backend ?? '—')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[0.65rem] text-[#64748b]">Schema</span>
+                        <span className="text-[0.65rem] font-mono font-bold text-[#94a3b8]">v{String(storageStats.schema_version ?? '?')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[0.65rem] text-[#64748b]">Runs</span>
+                        <span className="text-[0.65rem] font-mono font-bold text-emerald-400">{String(storageStats.run_count ?? '—')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[0.65rem] text-[#64748b]">Events</span>
+                        <span className="text-[0.65rem] font-mono font-bold text-blue-400">{String(storageStats.event_count ?? '—')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[0.65rem] text-[#64748b]">Artifacts</span>
+                        <span className="text-[0.65rem] font-mono font-bold text-violet-400">{String(storageStats.artifact_count ?? '—')}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1 border-t border-white/5">
+                        <span className="text-[0.65rem] text-[#64748b]">DB File</span>
+                        <span className="text-[0.6rem] font-mono text-[#475569] truncate max-w-[100px]">{String(storageStats.db_path ?? '—')}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[0.65rem] text-[#475569]">Loading storage info…</p>
+                  )}
                 </Card>
 
                 {/* Plan View */}
