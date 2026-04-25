@@ -105,3 +105,17 @@ def test_extra_indexes_exist(tmp_path):
     assert "idx_run_events_type" in indexes
     assert "idx_run_events_created_at" in indexes
     assert "idx_run_artifacts_run_id" in indexes
+
+
+def test_run_artifacts_has_foreign_key(tmp_path):
+    db = SQLiteBackend(tmp_path / "fk.db")
+    with db._conn() as conn:
+        # PRAGMA foreign_key_list(table_name)
+        fk_list = conn.execute("PRAGMA foreign_key_list('run_artifacts')").fetchall()
+        # Returns list of (id, seq, table, from, to, on_update, on_delete, match)
+        assert len(fk_list) > 0
+        fk = fk_list[0]
+        assert fk[2] == "runs"
+        assert fk[3] == "run_id"
+        assert fk[4] == "run_id"
+        assert fk[6] == "CASCADE"

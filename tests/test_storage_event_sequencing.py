@@ -112,3 +112,22 @@ def test_no_orphan_events_if_cycle_transition_fails(tmp_path):
 
     # Seq must still be 1 — no orphan events
     assert db.get_last_seq("r4") == 1
+
+
+def test_artifact_index_rollback_on_failure(tmp_path):
+    """If state commit fails, no artifacts should be inserted into the index."""
+    db = SQLiteBackend(tmp_path / "rollback_art.db")
+    db.create_run("r5", config={})
+
+    art = {"id": "art-999", "title": "Fail Art", "type": "note"}
+    transition = _make_transition("r5", 1)
+    transition.state.artifacts = [art]  # type: ignore
+
+    import unittest.mock as mock
+    # Patch self.append_events_tx to fail inside the transaction
+    with mock.patch.object(SQLiteBackend, "append_events_tx", side_effect=RuntimeError("db fail")):
+        with pytest.raises(RuntimeError):
+            db.apply_cycle_transition(transition)
+
+    # Index should be empty
+    assert len(db.list_artifacts("r5")) == 0

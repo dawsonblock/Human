@@ -106,3 +106,30 @@ def test_older_state_only_artifacts_still_render(tmp_path):
     # run_artifacts is empty but list_artifacts should not error
     listed = db.list_artifacts("r5")
     assert isinstance(listed, list)
+
+
+def test_artifact_listing_merges_index_and_blob(tmp_path):
+    """Verify that list_artifacts merges index rows and state blob artifacts."""
+    db = SQLiteBackend(tmp_path / "merge.db")
+    db.create_run("r6", config={})
+
+    # 1. Manually insert one artifact into state blob only
+    art_blob = _artifact_dict("art-blob", "Blob Only")
+    state = AgentStateV2_1(cycle_id=1)
+    state.artifacts = [art_blob]  # type: ignore
+    db.save_state("r6", state)
+
+    # 2. Insert another artifact via normal transition (goes to index + blob)
+    art_indexed = _artifact_dict("art-idx", "Indexed")
+    # We need to make sure we don't overwrite the blob-only one if we were using a real cycle
+    # but here we just want to test the MERGE logic of list_artifacts.
+    # So we'll manually insert into index.
+    with db._conn() as conn:
+        db._mirror_artifacts_tx(conn, "r6", AgentStateV2_1(artifacts=[art_indexed]))
+        conn.commit()
+
+    listed = db.list_artifacts("r6")
+    ids = [a["id"] for a in listed]
+    assert "art-blob" in ids
+    assert "art-idx" in ids
+    assert len(listed) == 2

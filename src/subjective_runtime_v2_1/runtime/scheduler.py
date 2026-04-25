@@ -5,11 +5,11 @@ from dataclasses import asdict
 from subjective_runtime_v2_1.runtime.events import EventManager
 from subjective_runtime_v2_1.runtime.supervisor import RunConfig, RunSupervisor
 from subjective_runtime_v2_1.state.models import AgentStateV2_1
-from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.storage.interfaces import RunStore
 
 
 class RuntimeScheduler:
-    def __init__(self, runtime_factory, events: EventManager, db: SQLiteRunStore) -> None:
+    def __init__(self, runtime_factory, events: EventManager, db: RunStore) -> None:
         self.runtime_factory = runtime_factory
         self.events = events
         self.db = db

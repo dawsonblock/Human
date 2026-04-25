@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.storage.interfaces import RunStore
 
 
 @dataclass(slots=True)
@@ -47,7 +47,7 @@ class LiveEventBus:
 
 
 class EventManager:
-    def __init__(self, store: SQLiteRunStore, live_bus: LiveEventBus | None = None) -> None:
+    def __init__(self, store: RunStore, live_bus: LiveEventBus | None = None) -> None:
         self.store = store
         self.live_bus = live_bus or LiveEventBus()
         self._locks: dict[str, asyncio.Lock] = {}

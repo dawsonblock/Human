@@ -7,7 +7,7 @@ from typing import Any, Callable
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager, RuntimeEvent
 from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
-from subjective_runtime_v2_1.state.sqlite_store import SQLiteRunStore
+from subjective_runtime_v2_1.storage.interfaces import RunStore
 from subjective_runtime_v2_1.util.time import now_ts
 
 
@@ -29,7 +29,7 @@ class RunSupervisor:
         runtime: RuntimeCore,
         events: EventManager,
         config: RunConfig,
-        run_store: SQLiteRunStore,
+        run_store: RunStore,
     ) -> None:
         self.run_id = run_id
         self.runtime = runtime

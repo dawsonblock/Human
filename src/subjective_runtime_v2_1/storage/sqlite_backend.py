@@ -39,9 +39,25 @@ class SQLiteBackend(SQLiteRunStore):
     def __init__(self, path: str | Path = "runtime.db") -> None:
         # Delegate to parent which calls _init_db()
         super().__init__(path)
+        # Enable WAL for file-backed DBs
+        if str(path) != ":memory:":
+            with self._conn() as conn:
+                conn.execute("PRAGMA journal_mode = WAL")
         # Run migrations on top of the base schema
         with self._conn() as conn:
             apply_migrations(conn)
+
+    @sqlite3.connect.register if hasattr(sqlite3.connect, "register") else None # type: ignore
+    @contextmanager
+    def _conn(self):
+        """Override parent _conn to apply safety pragmas on every connection."""
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            yield conn
+        finally:
+            conn.close()
 
     # ── Atomic lifecycle event ───────────────────────────────────────────────
 
@@ -88,37 +104,66 @@ class SQLiteBackend(SQLiteRunStore):
     # ── apply_cycle_transition with artifact mirroring ───────────────────────
 
     def apply_cycle_transition(self, transition_or_run_id, new_state=None, cycle_events=None, status=None):  # type: ignore[override]
-        """Atomic cycle commit + artifact index mirror.
+        """Fully atomic cycle commit including state, events, and artifact index.
 
-        Delegates the core commit to the parent implementation, then upserts
-        ``state.artifacts`` into the ``run_artifacts`` index table inside the
-        same logical write window (a second connection after the state commit).
-
-        SQLite serialises all writes so the two operations are ordered
-        correctly even without a shared transaction.
+        Implements the transition in a single ``BEGIN IMMEDIATE`` transaction.
+        If state serialisation, event insertion, or artifact indexing fails,
+        the entire transaction is rolled back.
         """
-        committed = super().apply_cycle_transition(
-            transition_or_run_id, new_state, cycle_events, status
-        )
-        # Mirror artifacts to the index table
-        try:
-            self._mirror_artifacts(transition_or_run_id)
-        except Exception:
-            pass  # Never let artifact indexing crash the cycle
-        return committed
+        from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
+        from subjective_runtime_v2_1.state.store import state_to_dict
 
-    def _mirror_artifacts(self, transition_or_run_id) -> None:
-        """Upsert state.artifacts into run_artifacts for the given run."""
-        from subjective_runtime_v2_1.runtime.transition import CycleTransition
-
+        # --- resolve arguments ---
         if isinstance(transition_or_run_id, CycleTransition):
-            run_id = transition_or_run_id.run_id
-            artifacts = getattr(transition_or_run_id.state, "artifacts", []) or []
+            transition = transition_or_run_id
+            run_id = transition.run_id
+            state = transition.state
+            status = status if status is not None else transition.status_override
+            events_to_commit = [{"type": d.type, "payload": d.payload} for d in transition.events]
         else:
             run_id = transition_or_run_id
-            state = self.load_state(run_id)
-            artifacts = getattr(state, "artifacts", []) if state else []
+            state = new_state
+            raw = list(cycle_events) if cycle_events else []
+            events_to_commit = [
+                {"type": e.type, "payload": e.payload} if isinstance(e, RuntimeEventDraft) else {"type": e[0], "payload": e[1]}
+                for e in raw
+            ]
 
+        now = time.time()
+        state_payload = json.dumps(state_to_dict(state))
+        committed_events: list[dict[str, Any]] = []
+
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. Update run state
+                if status is None:
+                    conn.execute(
+                        'UPDATE runs SET state_json = ?, updated_at = ? WHERE run_id = ?',
+                        (state_payload, now, run_id),
+                    )
+                else:
+                    conn.execute(
+                        'UPDATE runs SET state_json = ?, status = ?, updated_at = ? WHERE run_id = ?',
+                        (state_payload, status, now, run_id),
+                    )
+
+                # 2. Append events (reuse parent logic but pass active connection)
+                committed_events = self.append_events_tx(conn, run_id, events_to_commit, now=now)
+
+                # 3. Mirror artifacts into the index
+                self._mirror_artifacts_tx(conn, run_id, state)
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        return committed_events
+
+    def _mirror_artifacts_tx(self, conn: sqlite3.Connection, run_id: str, state: Any) -> None:
+        """Upsert state.artifacts into run_artifacts using the provided transaction."""
+        artifacts = getattr(state, "artifacts", []) or []
         if not artifacts:
             return
 
@@ -139,10 +184,7 @@ class SQLiteBackend(SQLiteRunStore):
                 d.get("step_id"),
             ))
 
-        if not rows:
-            return
-
-        with self._conn() as conn:
+        if rows:
             conn.executemany(
                 """
                 INSERT OR REPLACE INTO run_artifacts
@@ -152,17 +194,32 @@ class SQLiteBackend(SQLiteRunStore):
                 """,
                 rows,
             )
-            conn.commit()
+
+    def _mirror_artifacts(self, transition_or_run_id) -> None:
+        """Legacy non-atomic mirror fallback (unused by apply_cycle_transition)."""
+        from subjective_runtime_v2_1.runtime.transition import CycleTransition
+        if isinstance(transition_or_run_id, CycleTransition):
+            run_id = transition_or_run_id.run_id
+            state = transition_or_run_id.state
+        else:
+            run_id = transition_or_run_id
+            state = self.load_state(run_id)
+        
+        if state:
+            with self._conn() as conn:
+                self._mirror_artifacts_tx(conn, run_id, state)
+                conn.commit()
 
     # ── Artifact listing ─────────────────────────────────────────────────────
 
     def list_artifacts(self, run_id: str) -> list[dict[str, Any]]:
-        """List artifacts for a run.
+        """List artifacts for a run, merging indexed rows with state.artifacts fallback.
 
-        Reads from the ``run_artifacts`` index first.  If the index has no rows
-        for this run (older database), falls back to reading ``state.artifacts``
-        from the state JSON blob.
+        Always reads the latest state JSON and the artifact index, merging them
+        by artifact ID to ensure a complete list even if mirroring failed or
+        was incomplete in the past.  Prefers indexed rows for overlapping IDs.
         """
+        # 1. Read from index
         with self._conn() as conn:
             rows = conn.execute(
                 """
@@ -170,37 +227,38 @@ class SQLiteBackend(SQLiteRunStore):
                        content_json, provenance_json, created_at, step_id
                 FROM run_artifacts
                 WHERE run_id = ?
-                ORDER BY created_at ASC
                 """,
                 (run_id,),
             ).fetchall()
 
-        if rows:
-            return [
-                {
-                    "id": r[0],
-                    "run_id": r[1],
-                    "type": r[2],
-                    "title": r[3],
-                    "content": json.loads(r[4]),
-                    "provenance": json.loads(r[5]),
-                    "created_at": r[6],
-                    "step_id": r[7],
-                }
-                for r in rows
-            ]
+        indexed = {
+            r[0]: {
+                "id": r[0],
+                "run_id": r[1],
+                "type": r[2],
+                "title": r[3],
+                "content": json.loads(r[4]),
+                "provenance": json.loads(r[5]),
+                "created_at": r[6],
+                "step_id": r[7],
+            }
+            for r in rows
+        }
 
-        # Fallback: read from state blob
+        # 2. Read from state blob fallback
         state = self.load_state(run_id)
-        if state is None:
-            return []
-        artifacts = getattr(state, "artifacts", []) or []
+        blob_artifacts = getattr(state, "artifacts", []) if state else []
         from dataclasses import asdict
-        result = []
-        for a in artifacts:
+        
+        merged = dict(indexed)
+        for a in blob_artifacts:
             d = asdict(a) if hasattr(a, "__dataclass_fields__") else (a if isinstance(a, dict) else {})
-            result.append(d)
-        return result
+            aid = d.get("id")
+            if aid and aid not in merged:
+                merged[aid] = d
+
+        # 3. Return sorted by created_at
+        return sorted(merged.values(), key=lambda x: x.get("created_at", 0))
 
     # ── Storage statistics ───────────────────────────────────────────────────
 

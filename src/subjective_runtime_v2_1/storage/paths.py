@@ -38,13 +38,17 @@ class StoragePaths:
         # Database path
         env_db = os.environ.get("HUMAN_DB_PATH")
         raw_db = db_path or env_db or (self.data_dir / "runtime.db")
-        self.db_path: Path = Path(raw_db).resolve()
+        if str(raw_db) == ":memory:":
+            self.db_path: Path | str = ":memory:"
+        else:
+            self.db_path: Path | str = Path(raw_db).resolve()
 
         # Allowed roots
         if allowed_roots:
             raw_roots = allowed_roots
         elif "HUMAN_ALLOWED_ROOTS" in os.environ:
-            raw_roots = [r for r in os.environ["HUMAN_ALLOWED_ROOTS"].split(":") if r]
+            # Use os.pathsep (":" on Unix, ";" on Windows)
+            raw_roots = [r for r in os.environ["HUMAN_ALLOWED_ROOTS"].split(os.pathsep) if r]
         else:
             raw_roots = [str(self.data_dir / "workspace")]
 
@@ -53,10 +57,19 @@ class StoragePaths:
     def _resolve_roots(self, raw: list[str]) -> list[Path]:
         resolved: list[Path] = []
         for r in raw:
+            if not r or not r.strip():
+                continue
+            # PRE-RESOLUTION TRAVERSAL REJECTION
+            # Reject if the raw string contains ".." as a path segment
+            if ".." in r.replace("\\", "/").split("/"):
+                raise ValueError(
+                    f"Allowed root rejected — raw path traversal detected: {r!r}"
+                )
+
             p = Path(r).resolve()
             if not _is_safe_path(p):
                 raise ValueError(
-                    f"Allowed root rejected — path traversal detected: {r!r}"
+                    f"Allowed root rejected — resolved path traversal detected: {r!r}"
                 )
             resolved.append(p)
         return resolved

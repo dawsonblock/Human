@@ -107,7 +107,8 @@ def _migrate_v1(conn: sqlite3.Connection) -> None:
             content_json   TEXT NOT NULL,
             provenance_json TEXT NOT NULL,
             created_at     REAL NOT NULL,
-            step_id        TEXT
+            step_id        TEXT,
+            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
         )
         """
     )

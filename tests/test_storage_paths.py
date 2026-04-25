@@ -40,6 +40,12 @@ def test_human_db_path_overrides_default(tmp_path, monkeypatch):
     assert paths.db_path == explicit_db.resolve()
 
 
+def test_db_path_memory_preserved(monkeypatch):
+    monkeypatch.setenv("HUMAN_DB_PATH", ":memory:")
+    paths = StoragePaths()
+    assert paths.db_path == ":memory:"
+
+
 def test_human_allowed_roots_parsed(tmp_path, monkeypatch):
     r1 = tmp_path / "root1"
     r2 = tmp_path / "root2"
@@ -71,6 +77,24 @@ def test_run_workspace_rejects_path_traversal(tmp_path, monkeypatch):
     paths = StoragePaths()
     with pytest.raises(ValueError, match="Invalid run_id"):
         paths.run_workspace("../../etc/passwd")
+
+
+def test_allowed_roots_rejects_traversal_before_resolution(tmp_path):
+    # This should be rejected even if the path doesn't exist or is not absolute yet
+    with pytest.raises(ValueError, match="raw path traversal detected"):
+        StoragePaths(allowed_roots=["../../etc"])
+    
+    with pytest.raises(ValueError, match="raw path traversal detected"):
+        StoragePaths(allowed_roots=["/safe/path/../etc"])
+
+
+def test_human_allowed_roots_uses_os_pathsep(tmp_path, monkeypatch):
+    import os
+    r1 = str(tmp_path / "a")
+    r2 = str(tmp_path / "b")
+    monkeypatch.setenv("HUMAN_ALLOWED_ROOTS", f"{r1}{os.pathsep}{r2}")
+    paths = StoragePaths()
+    assert len(paths.allowed_roots) == 2
 
 
 def test_allowed_roots_str_returns_strings(tmp_path, monkeypatch):
