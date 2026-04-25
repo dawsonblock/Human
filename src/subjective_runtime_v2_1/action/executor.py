@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import time
 
 from subjective_runtime_v2_1.action.context import ExecutionContext
@@ -8,6 +9,10 @@ from subjective_runtime_v2_1.action.registry import ToolRegistry
 from subjective_runtime_v2_1.state.models import ActionOption
 
 _DEFAULT_TIMEOUT_SEC = 30.0
+_THREAD_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="tool_exec",
+)
 
 
 class Executor:
@@ -46,6 +51,21 @@ class Executor:
                 "artifacts": [],
                 "step_id": action.target.get("step_id"),
             }
+        except Exception as exc:  # pragma: no cover
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            return {
+                "status": "error",
+                "tool_name": call.tool_name,
+                "arguments": call.arguments,
+                "result": {},
+                "error": f"tool raised unexpected exception: {exc}",
+                "latency_ms": latency_ms,
+                "memory_writes": [],
+                "state_delta": {},
+                "observations": [],
+                "artifacts": [],
+                "step_id": action.target.get("step_id"),
+            }
 
         result.latency_ms = (time.perf_counter() - start) * 1000.0
         return {
@@ -63,12 +83,15 @@ class Executor:
         }
 
     def _invoke_with_timeout(self, call: ToolCall, ctx: ExecutionContext, timeout: float):
-        """Invoke the tool.  For CPU-bound sync tools this is a simple call;
-        the timeout guard catches runaway tools via a deadline check after invoke.
-        Truly blocking I/O would require threading — kept simple for now."""
-        start = time.perf_counter()
-        result = self.registry.invoke(call, ctx)
-        elapsed = time.perf_counter() - start
-        if elapsed > timeout:
+        """Invoke the tool in a thread pool with a real wall-clock timeout.
+
+        Unlike a post-hoc elapsed-time check, this actually interrupts a
+        blocking call (filesystem hang, slow Ollama, etc.) by abandoning the
+        future after ``timeout`` seconds.  The thread may continue to run in
+        the background but the executor returns a TimeoutError immediately.
+        """
+        future = _THREAD_POOL.submit(self.registry.invoke, call, ctx)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
             raise TimeoutError(f"tool exceeded {timeout}s")
-        return result

@@ -6,6 +6,8 @@ from subjective_runtime_v2_1.action.context import ExecutionContext
 from subjective_runtime_v2_1.action.contracts import ToolCall, ToolResult, ToolSpec
 from subjective_runtime_v2_1.action.tools.base import Tool
 
+_MAX_WRITE_BYTES = 1_000_000  # 1 MB
+
 
 class FileWriteTool(Tool):
     spec = ToolSpec(
@@ -25,9 +27,30 @@ class FileWriteTool(Tool):
         self.allowed_roots = [Path(root).resolve() for root in allowed_roots]
 
     def invoke(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
-        path = Path(call.arguments["path"]).resolve()
+        try:
+            path = Path(call.arguments["path"]).resolve()
+        except (TypeError, ValueError) as e:
+            return ToolResult(ok=False, output={}, error=f"invalid path argument: {e}")
+
+        text = call.arguments.get("text", "")
+        if not isinstance(text, str):
+            return ToolResult(ok=False, output={}, error="text argument must be a string")
+
         if not any(path.is_relative_to(root) for root in self.allowed_roots):
             return ToolResult(ok=False, output={}, error="path outside allowed roots")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(call.arguments["text"], encoding="utf-8")
-        return ToolResult(ok=True, output={"written": True, "path": str(path)})
+
+        encoded = text.encode("utf-8")
+        if len(encoded) > _MAX_WRITE_BYTES:
+            return ToolResult(
+                ok=False,
+                output={},
+                error=f"write content too large ({len(encoded)} bytes > {_MAX_WRITE_BYTES} byte limit)",
+            )
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        except OSError as e:
+            return ToolResult(ok=False, output={}, error=f"cannot write file: {e}")
+
+        return ToolResult(ok=True, output={"written": True, "path": str(path), "bytes": len(encoded)})

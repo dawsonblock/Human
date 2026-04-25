@@ -6,6 +6,8 @@ from subjective_runtime_v2_1.action.context import ExecutionContext
 from subjective_runtime_v2_1.action.contracts import ToolCall, ToolResult, ToolSpec
 from subjective_runtime_v2_1.action.tools.base import Tool
 
+_MAX_READ_BYTES = 1_000_000  # 1 MB
+
 
 class FileReadTool(Tool):
     spec = ToolSpec(
@@ -23,7 +25,35 @@ class FileReadTool(Tool):
         self.allowed_roots = [Path(root).resolve() for root in allowed_roots]
 
     def invoke(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
-        path = Path(call.arguments["path"]).resolve()
+        try:
+            path = Path(call.arguments["path"]).resolve()
+        except (TypeError, ValueError) as e:
+            return ToolResult(ok=False, output={}, error=f"invalid path argument: {e}")
+
         if not any(path.is_relative_to(root) for root in self.allowed_roots):
             return ToolResult(ok=False, output={}, error="path outside allowed roots")
-        return ToolResult(ok=True, output={"path": str(path), "text": path.read_text(encoding="utf-8")})
+
+        if not path.exists():
+            return ToolResult(ok=False, output={}, error=f"path does not exist: {path}")
+
+        if not path.is_file():
+            return ToolResult(ok=False, output={}, error=f"path is not a regular file: {path}")
+
+        try:
+            size = path.stat().st_size
+        except OSError as e:
+            return ToolResult(ok=False, output={}, error=f"cannot stat file: {e}")
+
+        if size > _MAX_READ_BYTES:
+            return ToolResult(
+                ok=False,
+                output={},
+                error=f"file too large ({size} bytes > {_MAX_READ_BYTES} byte limit)",
+            )
+
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return ToolResult(ok=False, output={}, error=f"cannot read file: {e}")
+
+        return ToolResult(ok=True, output={"path": str(path), "text": text})

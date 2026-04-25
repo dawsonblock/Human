@@ -198,13 +198,6 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
         supervisor = scheduler.get(run_id)
         if supervisor is None:
             raise HTTPException(status_code=404, detail='run not found')
-        # Resume plan if it was blocked waiting for approval
-        state = db.load_state(run_id)
-        if state and state.active_plan and state.active_plan.status == 'blocked':
-            state.active_plan.status = 'active'
-            state.stop_reason = None
-            db.save_state(run_id, state)
-            supervisor.runtime.state_store.save(run_id, state)
         ok = await supervisor.approve_action(req.action_id)
         if not ok:
             raise HTTPException(status_code=404, detail='pending approval request not found')
@@ -218,13 +211,6 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
         ok = await supervisor.deny_action(req.action_id)
         if not ok:
             raise HTTPException(status_code=404, detail='pending approval request not found')
-        # Mark plan failed/blocked on denial
-        state = db.load_state(run_id)
-        if state and state.active_plan and state.active_plan.status == 'blocked':
-            state.active_plan.status = 'failed'
-            state.stop_reason = 'blocked'
-            state.run_outcome = {'stop_reason': 'blocked', 'reason': 'approval_denied'}
-            db.save_state(run_id, state)
         return {'run_id': run_id, 'action_id': req.action_id, 'status': 'denied'}
 
     @router.get('/runtime/tools')
@@ -262,8 +248,8 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
             'post_narrative': state.post_narrative,
             'interpretive_bias': state.interpretive_bias,
             'pending_options': state.pending_options,
-            'last_action': asdict(state.last_action) if getattr(state, 'last_action', None) else None,
-            'last_outcome': asdict(state.last_outcome) if getattr(state, 'last_outcome', None) else None,
+            'last_action': state.last_action if getattr(state, 'last_action', None) else None,
+            'last_outcome': state.last_outcome if getattr(state, 'last_outcome', None) else None,
             'world_model': state.world_model,
             'self_model': getattr(state, 'self_model', None),
             'regulation': {

@@ -157,7 +157,7 @@ class RunSupervisor:
             return self.run_store.apply_cycle_transition(transition)
 
     async def approve_action(self, action_id: str) -> bool:
-        """Mark the pending approval request as approved and re-queue for execution."""
+        """Mark the pending approval request as approved, unblock the plan, and re-queue."""
         decided_at = now_ts()
 
         def _approve(state):
@@ -165,6 +165,10 @@ class RunSupervisor:
                 if req.get("action_id") == action_id and req.get("status") == "pending":
                     req["status"] = "approved"
                     req["decided_at"] = decided_at
+                    # Unblock the plan under the same atomic mutation
+                    if state.active_plan and state.active_plan.status == "blocked":
+                        state.active_plan.status = "active"
+                        state.stop_reason = None
                     return [self._approval_event_draft("approval_granted", action_id, decided_at)]
             return []
 
@@ -185,7 +189,7 @@ class RunSupervisor:
         return True
 
     async def deny_action(self, action_id: str) -> bool:
-        """Mark the pending approval request as denied."""
+        """Mark the pending approval request as denied and mark plan failed."""
         decided_at = now_ts()
 
         def _deny(state):
@@ -193,6 +197,11 @@ class RunSupervisor:
                 if req.get("action_id") == action_id and req.get("status") == "pending":
                     req["status"] = "denied"
                     req["decided_at"] = decided_at
+                    # Fail the plan under the same atomic mutation
+                    if state.active_plan and state.active_plan.status == "blocked":
+                        state.active_plan.status = "failed"
+                        state.stop_reason = "blocked"
+                        state.run_outcome = {"stop_reason": "blocked", "reason": "approval_denied"}
                     return [self._approval_event_draft("approval_denied", action_id, decided_at)]
             return []
 
