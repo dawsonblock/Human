@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,6 @@ class SQLiteBackend(SQLiteRunStore):
         with self._conn() as conn:
             apply_migrations(conn)
 
-    @sqlite3.connect.register if hasattr(sqlite3.connect, "register") else None # type: ignore
     @contextmanager
     def _conn(self):
         """Override parent _conn to apply safety pragmas on every connection."""

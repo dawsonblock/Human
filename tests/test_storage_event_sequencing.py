@@ -104,7 +104,7 @@ def test_no_orphan_events_if_cycle_transition_fails(tmp_path):
 
     bad_transition = _make_transition("r4", 2)
     with mock.patch(
-        "subjective_runtime_v2_1.state.sqlite_store.state_to_dict",
+        "subjective_runtime_v2_1.state.store.state_to_dict",
         side_effect=ValueError("boom"),
     ):
         with pytest.raises(ValueError):
@@ -119,7 +119,7 @@ def test_artifact_index_rollback_on_failure(tmp_path):
     db = SQLiteBackend(tmp_path / "rollback_art.db")
     db.create_run("r5", config={})
 
-    art = {"id": "art-999", "title": "Fail Art", "type": "note"}
+    art = {"id": "art-999", "run_id": "r5", "title": "Fail Art", "type": "note"}
     transition = _make_transition("r5", 1)
     transition.state.artifacts = [art]  # type: ignore
 

@@ -10,9 +10,10 @@ from subjective_runtime_v2_1.state.models import AgentStateV2_1
 from subjective_runtime_v2_1.runtime.transition import CycleTransition, RuntimeEventDraft
 
 
-def _artifact_dict(artifact_id: str, title: str = "Test Artifact") -> dict:
+def _artifact_dict(run_id: str, artifact_id: str, title: str = "Test Artifact") -> dict:
     return {
         "id": artifact_id,
+        "run_id": run_id,
         "type": "note",
         "title": title,
         "content": {"text": f"content of {artifact_id}"},
@@ -47,7 +48,7 @@ def test_artifacts_persisted_to_index(tmp_path):
     db = SQLiteBackend(tmp_path / "art.db")
     db.create_run("r1", config={})
 
-    art = _artifact_dict("art-001", "My Note")
+    art = _artifact_dict("r1", "art-001", "My Note")
     db.apply_cycle_transition(_make_transition("r1", [art]))
 
     listed = db.list_artifacts("r1")
@@ -60,7 +61,7 @@ def test_artifacts_survive_restart(tmp_path):
     db_path = tmp_path / "restart.db"
     db1 = SQLiteBackend(db_path)
     db1.create_run("r2", config={})
-    db1.apply_cycle_transition(_make_transition("r2", [_artifact_dict("art-002")]))
+    db1.apply_cycle_transition(_make_transition("r2", [_artifact_dict("r2", "art-002")]))
 
     # Reopen
     db2 = SQLiteBackend(db_path)
@@ -72,7 +73,7 @@ def test_duplicate_commits_do_not_duplicate_artifacts(tmp_path):
     db = SQLiteBackend(tmp_path / "dup.db")
     db.create_run("r3", config={})
 
-    art = _artifact_dict("art-003")
+    art = _artifact_dict("r3", "art-003")
     # Commit the same artifact twice (e.g. after a retry)
     db.apply_cycle_transition(_make_transition("r3", [art]))
     db.apply_cycle_transition(_make_transition("r3", [art]))
@@ -86,7 +87,7 @@ def test_multiple_artifacts_all_indexed(tmp_path):
     db = SQLiteBackend(tmp_path / "multi.db")
     db.create_run("r4", config={})
 
-    arts = [_artifact_dict(f"art-{i:03d}", f"Artifact {i}") for i in range(5)]
+    arts = [_artifact_dict("r4", f"art-{i:03d}", f"Artifact {i}") for i in range(5)]
     db.apply_cycle_transition(_make_transition("r4", arts))
 
     listed = db.list_artifacts("r4")
@@ -114,13 +115,13 @@ def test_artifact_listing_merges_index_and_blob(tmp_path):
     db.create_run("r6", config={})
 
     # 1. Manually insert one artifact into state blob only
-    art_blob = _artifact_dict("art-blob", "Blob Only")
+    art_blob = _artifact_dict("r6", "art-blob", "Blob Only")
     state = AgentStateV2_1(cycle_id=1)
     state.artifacts = [art_blob]  # type: ignore
     db.save_state("r6", state)
 
     # 2. Insert another artifact via normal transition (goes to index + blob)
-    art_indexed = _artifact_dict("art-idx", "Indexed")
+    art_indexed = _artifact_dict("r6", "art-idx", "Indexed")
     # We need to make sure we don't overwrite the blob-only one if we were using a real cycle
     # but here we just want to test the MERGE logic of list_artifacts.
     # So we'll manually insert into index.
