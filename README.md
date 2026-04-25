@@ -160,7 +160,7 @@ cd ..
 ### 3. Run the test suite
 
 ```bash
-pytest                      # 180+ tests, all passing
+pytest                      # 200+ tests, all passing
 ```
 
 ### 4. Start the server
@@ -571,7 +571,7 @@ pytest tests/test_runtime_authority_gates.py  # Approval authority
 pytest --tb=short -q                          # Quiet output
 ```
 
-**180+ tests, 0 failures.**
+**200+ tests, 0 failures.**
 
 ### Test coverage areas
 

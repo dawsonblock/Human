@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from subjective_runtime_v2_1.action.executor import Executor
 from subjective_runtime_v2_1.action.gate import ActionGate
 from subjective_runtime_v2_1.action.tools import build_tool_registry
-from subjective_runtime_v2_1.api.routes import build_router
+from subjective_runtime_v2_1.api.routes import build_router, build_dev_router
 from subjective_runtime_v2_1.runtime.core import RuntimeCore
 from subjective_runtime_v2_1.runtime.events import EventManager, LiveEventBus
 from subjective_runtime_v2_1.runtime.scheduler import RuntimeScheduler
@@ -102,6 +102,10 @@ def create_app(
 
     app = FastAPI(title='subjective_runtime_v2_1', lifespan=lifespan)
     app.include_router(build_router(runtime_factory, scheduler, db, events, registry), prefix="/api")
+
+    import os
+    if os.getenv("ALLOW_DEV_TERMINAL") == "1":
+        app.include_router(build_dev_router(), prefix="/api")
 
     # Serve the single-page UI
     if _STATIC_DIR.exists():

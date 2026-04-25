@@ -288,8 +288,21 @@ def build_router(runtime_factory, scheduler, db, events, registry=None):
             }
         }
 
+    return router
+
+
+def build_dev_router():
+    """Build a router for dangerous developer-only endpoints.
+
+    This router provides a raw bash terminal escape hatch. It is explicitly
+    isolated from the main API router and should only be mounted when
+    ``ALLOW_DEV_TERMINAL=1`` is set.
+    """
+    router = APIRouter()
+
     @router.websocket('/terminal')
     async def terminal_endpoint(websocket: WebSocket):
+        # Even if mounted, we still check the env var as a second layer of defense.
         if os.getenv("ALLOW_DEV_TERMINAL") != "1":
             await websocket.close(code=1008, reason="Terminal access disabled by default for security.")
             return
