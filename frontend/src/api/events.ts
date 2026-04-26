@@ -2,7 +2,8 @@ export type EventType =
   | 'cycle_completed' | 'tool_call_executed' | 'tool_call_failed'
   | 'plan_created' | 'plan_step_completed' | 'plan_step_failed' | 'plan_step_started'
   | 'goal_completed' | 'approval_requested' | 'approval_granted' | 'approval_denied'
-  | 'run_finished' | 'run_paused' | 'run_resumed';
+  | 'run_finished' | 'run_paused' | 'run_resumed'
+  | 'thought' | 'plan_generated' | 'cycle_transition' | 'action_option_selected';
 
 export interface RuntimeEvent {
   run_id: string;
@@ -31,7 +32,8 @@ export function subscribeToEvents(runId: string, onEvent: (event: RuntimeEvent) 
     'cycle_completed', 'tool_call_executed', 'tool_call_failed',
     'plan_created', 'plan_step_completed', 'plan_step_failed', 'plan_step_started',
     'goal_completed', 'approval_requested', 'approval_granted', 'approval_denied',
-    'run_finished', 'run_paused', 'run_resumed'
+    'run_finished', 'run_paused', 'run_resumed',
+    'thought', 'plan_generated', 'cycle_transition', 'action_option_selected'
   ];
 
   eventTypes.forEach(type => {

@@ -34,7 +34,7 @@ const App: React.FC = () => {
   const [connected, setConnected] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'graph' | 'help'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'graph' | 'help' | 'responses'>('timeline');
   const [llmConnected, setLlmConnected] = useState<boolean | null>(null);
   const [storageStats, setStorageStats] = useState<Record<string, unknown> | null>(null);
   
@@ -147,24 +147,24 @@ const App: React.FC = () => {
   ).sort((a, b) => b.updated_at - a.updated_at);
 
   return (
-    <div className="flex h-screen bg-[#0a0d14] text-[#f8fafc] overflow-hidden font-sans selection:bg-blue-500/30">
+    <div className="flex h-screen bg-white text-slate-900 overflow-hidden font-sans selection:bg-blue-500/20">
       {/* Sidebar */}
-      <aside className="w-72 flex-shrink-0 bg-[#121620] border-r border-white/5 flex flex-col z-10 shadow-2xl">
-        <div className="p-6 border-b border-white/5">
+      <aside className="w-72 flex-shrink-0 bg-slate-50 border-r border-slate-200 flex flex-col z-10 shadow-sm">
+        <div className="p-6 border-b border-slate-200">
           <h1 className="text-[0.9rem] font-black text-white uppercase tracking-[0.2em] flex items-center gap-3">
             <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shadow-[0_0_15px_#3b82f6] animate-pulse" />
             Human
           </h1>
-          <p className="text-[0.65rem] text-[#64748b] mt-1 font-bold uppercase tracking-widest">Cognitive Runtime</p>
+          <p className="text-[0.65rem] text-slate-500 mt-1 font-bold uppercase tracking-widest">Cognitive Runtime</p>
         </div>
         
-        <div className="p-4 border-b border-white/5">
+        <div className="p-4 border-b border-slate-200">
           <div className="relative group">
-            <Search className="absolute left-3 top-2.5 w-4 h-4 text-[#64748b] group-focus-within:text-blue-400 transition-colors" />
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
             <input 
               type="text" 
               placeholder="Filter active runs..."
-              className="w-full bg-[#1a202c] border border-white/5 rounded-xl py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-[#475569]"
+              className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-400"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -179,8 +179,8 @@ const App: React.FC = () => {
               className={cn(
                 "p-4 rounded-xl cursor-pointer transition-all border border-transparent",
                 selectedRunId === r.run_id 
-                  ? "bg-blue-600/10 border-blue-500/30 shadow-inner shadow-blue-500/5" 
-                  : "hover:bg-white/[0.03] text-[#94a3b8] hover:text-white"
+                  ? "bg-blue-600/5 border-blue-500/20 shadow-sm" 
+                  : "hover:bg-slate-200/50 text-slate-500 hover:text-slate-900"
               )}
             >
               <div className="flex justify-between items-start mb-1">
@@ -192,13 +192,13 @@ const App: React.FC = () => {
                 )} />
               </div>
               <div className="text-[0.75rem] font-medium line-clamp-2 leading-snug">{r.goal?.description || 'No goal defined'}</div>
-              <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/[0.03]">
+              <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100">
                 <span className={cn(
                   "text-[0.6rem] font-black uppercase tracking-widest",
-                  r.status === 'running' ? "text-emerald-400" :
-                  r.status === 'paused' ? "text-amber-400" : "text-[#64748b]"
+                  r.status === 'running' ? "text-emerald-600" :
+                  r.status === 'paused' ? "text-amber-600" : "text-slate-500"
                 )}>{r.status}</span>
-                <span className="text-[0.6rem] text-[#475569] font-mono">
+                <span className="text-[0.6rem] text-slate-400 font-mono">
                   {new Date(r.updated_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
@@ -209,7 +209,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="p-5 border-t border-white/5 bg-[#0a0d14]/50">
+        <div className="p-5 border-t border-slate-200 bg-white">
           <button 
             onClick={() => setShowComposer(true)}
             className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95 flex items-center justify-center gap-2"
@@ -224,26 +224,26 @@ const App: React.FC = () => {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.03),transparent_60%)] pointer-events-none" />
         
         {/* Header */}
-        <header className="px-8 py-5 bg-[#121620]/60 backdrop-blur-3xl border-b border-white/5 flex items-center justify-between z-10 shadow-sm">
+        <header className="px-8 py-5 bg-white border-b border-slate-200 flex items-center justify-between z-10 shadow-sm">
           <div className="flex items-center gap-6 overflow-hidden">
-            <div className="flex-shrink-0 w-10 h-10 bg-blue-600/10 border border-blue-500/20 rounded-xl flex items-center justify-center text-blue-400">
+            <div className="flex-shrink-0 w-10 h-10 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center text-blue-600">
                <Cpu className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-xl font-black font-mono tracking-tight truncate">{selectedRunId || 'System Standby'}</h2>
+              <h2 className="text-xl font-black font-mono tracking-tight truncate text-slate-900">{selectedRunId || 'System Standby'}</h2>
               <div className="flex items-center gap-3 mt-0.5">
-                <p className="text-sm font-medium text-[#94a3b8] truncate max-w-[500px]">
+                <p className="text-sm font-medium text-slate-500 truncate max-w-[500px]">
                   {summary?.goal?.description || 'Initialize a run to begin monitoring execution state'}
                 </p>
                 {selectedRunId && (
-                  <div className="flex items-center gap-2 bg-white/[0.03] px-2.5 py-0.5 rounded-full border border-white/5">
-                    <div className={cn("w-1 h-1 rounded-full", connected ? "bg-emerald-400 shadow-[0_0_5px_#10b981] animate-pulse" : "bg-[#64748b]")} />
-                    <span className="text-[0.6rem] font-black text-[#64748b] uppercase tracking-tighter">{connected ? 'Live Sync' : 'Offline'}</span>
+                  <div className="flex items-center gap-2 bg-slate-50 px-2.5 py-0.5 rounded-full border border-slate-200">
+                    <div className={cn("w-1 h-1 rounded-full", connected ? "bg-emerald-500 shadow-[0_0_5px_#10b981] animate-pulse" : "bg-slate-400")} />
+                    <span className="text-[0.6rem] font-black text-slate-500 uppercase tracking-tighter">{connected ? 'Live Sync' : 'Offline'}</span>
                   </div>
                 )}
-                <div className={cn("flex items-center gap-2 bg-white/[0.03] px-2.5 py-0.5 rounded-full border border-white/5", llmConnected === null && "opacity-40")}>
-                  <div className={cn("w-1 h-1 rounded-full", llmConnected ? "bg-violet-400 shadow-[0_0_5px_#a78bfa] animate-pulse" : "bg-[#64748b]")} />
-                  <span className="text-[0.6rem] font-black text-[#64748b] uppercase tracking-tighter">{llmConnected ? 'LLM Ready' : 'LLM Offline'}</span>
+                <div className={cn("flex items-center gap-2 bg-slate-50 px-2.5 py-0.5 rounded-full border border-slate-200", llmConnected === null && "opacity-40")}>
+                  <div className={cn("w-1 h-1 rounded-full", llmConnected ? "bg-violet-500 shadow-[0_0_5px_#a78bfa] animate-pulse" : "bg-slate-400")} />
+                  <span className="text-[0.6rem] font-black text-slate-500 uppercase tracking-tighter">{llmConnected ? 'LLM Ready' : 'LLM Offline'}</span>
                 </div>
               </div>
             </div>
@@ -263,9 +263,9 @@ const App: React.FC = () => {
         </header>
 
         {selectedRunId ? (
-          <div className="flex-1 grid grid-cols-[340px_1fr_360px] h-full overflow-hidden">
+          <div className="flex-1 grid grid-cols-[340px_1fr_360px] h-full overflow-hidden bg-white">
             {/* Left Column: Health & Planning */}
-            <div className="border-r border-white/5 flex flex-col overflow-hidden bg-black/5">
+            <div className="border-r border-slate-200 flex flex-col overflow-hidden bg-slate-50/50">
               <PanelHeader title="Runtime Health & Plan" />
               <div className="p-6 space-y-6 overflow-y-auto">
                 {/* Metric Grid */}
@@ -359,17 +359,19 @@ const App: React.FC = () => {
 
             {/* Center Column: Views */}
             <div className="flex flex-col overflow-hidden">
-              <div className="px-6 py-4 bg-white/[0.02] border-b border-white/5 flex items-center justify-between">
-                <div className="text-[0.65rem] font-black text-[#475569] uppercase tracking-[0.25em]">
-                  {activeTab === 'timeline' ? 'Live Event Sourcing' : 'Cognitive Graph'}
+              <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-200 flex items-center justify-between">
+                <div className="text-[0.65rem] font-black text-slate-400 uppercase tracking-[0.25em]">
+                  {activeTab === 'timeline' ? 'Live Event Sourcing' : 
+                   activeTab === 'responses' ? 'AI Reasoner Response' : 'Cognitive Graph'}
                 </div>
-                <div className="flex bg-[#1a202c] rounded-lg border border-white/5 p-1">
-                  <button onClick={() => setActiveTab('timeline')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'timeline' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Timeline</button>
-                  <button onClick={() => setActiveTab('graph')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'graph' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Graph</button>
-                  <button onClick={() => setActiveTab('help')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'help' ? "bg-white/[0.05] text-white" : "text-[#475569] hover:text-[#94a3b8]")}>Help</button>
+                <div className="flex bg-slate-100 rounded-lg border border-slate-200 p-1">
+                  <button onClick={() => setActiveTab('timeline')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'timeline' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Timeline</button>
+                  <button onClick={() => setActiveTab('responses')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'responses' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Responses</button>
+                  <button onClick={() => setActiveTab('graph')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'graph' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Graph</button>
+                  <button onClick={() => setActiveTab('help')} className={cn("px-3 py-1 text-xs font-bold rounded transition-colors", activeTab === 'help' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Help</button>
                 </div>
               </div>
-              <div className="flex-1 overflow-hidden relative bg-[#0a0d14]">
+              <div className="flex-1 overflow-hidden relative bg-white">
                 <div 
                   ref={timelineRef} 
                   className={cn("absolute inset-0 overflow-y-auto scroll-smooth", activeTab !== 'timeline' && 'hidden')}
@@ -390,12 +392,13 @@ const App: React.FC = () => {
                   )}
                 </div>
                 {activeTab === 'graph' && <CognitiveGraph state={state} />}
+                {activeTab === 'responses' && <AIResponseTab events={events} />}
                 {activeTab === 'help' && <HelpTab />}
               </div>
             </div>
 
             {/* Right Column: Cognitive State & Queue */}
-            <div className="border-l border-white/5 flex flex-col overflow-hidden bg-black/5">
+            <div className="border-l border-slate-200 flex flex-col overflow-hidden bg-slate-50/50">
               <PanelHeader title="Introspection & Control" />
               <div className="p-6 space-y-6 overflow-y-auto">
                 {/* Approvals */}
@@ -452,12 +455,12 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-[#475569] gap-6 animate-in fade-in duration-700">
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-6 animate-in fade-in duration-700">
             <div className="w-24 h-24 rounded-[2rem] bg-blue-600/[0.03] border border-blue-500/[0.05] flex items-center justify-center text-blue-500/20">
                <Zap className="w-10 h-10" />
             </div>
             <div className="text-center space-y-2">
-              <h3 className="text-xl font-black text-[#94a3b8] tracking-tight uppercase">Runtime Idle</h3>
+              <h3 className="text-xl font-black text-slate-300 tracking-tight uppercase">Runtime Idle</h3>
               <p className="max-w-xs text-sm font-medium leading-relaxed opacity-60">Select an existing temporal thread or initiate a new cognitive objective to begin monitoring.</p>
             </div>
           </div>
@@ -465,29 +468,29 @@ const App: React.FC = () => {
 
         {/* Modals */}
         {showComposer && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0d14]/90 backdrop-blur-md p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in zoom-in-95 duration-200">
             <GoalComposer onSubmit={handleCreateRun} onCancel={() => setShowComposer(false)} />
           </div>
         )}
 
         {selectedArtifact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0a0d14]/95 backdrop-blur-md p-8 animate-in fade-in zoom-in-95 duration-200">
-             <div className="bg-[#121620] border border-white/10 rounded-3xl w-full max-w-4xl h-full flex flex-col overflow-hidden shadow-2xl">
-                <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-8 animate-in fade-in zoom-in-95 duration-200">
+             <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl h-full flex flex-col overflow-hidden shadow-2xl">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400">
+                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
                          <FileText className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-bold">{selectedArtifact.title}</h3>
-                        <p className="text-xs text-[#64748b] font-mono">{selectedArtifact.type} • {new Date(selectedArtifact.created_at * 1000).toLocaleString()}</p>
+                        <h3 className="text-lg font-bold text-slate-900">{selectedArtifact.title}</h3>
+                        <p className="text-xs text-slate-500 font-mono">{selectedArtifact.type} • {new Date(selectedArtifact.created_at * 1000).toLocaleString()}</p>
                       </div>
                    </div>
-                   <button onClick={() => setSelectedArtifact(null)} className="p-2 hover:bg-white/5 rounded-full transition-colors text-[#64748b] hover:text-white">
+                   <button onClick={() => setSelectedArtifact(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-900">
                       <Plus className="w-6 h-6 rotate-45" />
                    </button>
                 </div>
-                <div className="flex-1 overflow-auto p-8 font-mono text-[0.8rem] leading-relaxed text-[#cbd5e0] selection:bg-blue-500/40">
+                <div className="flex-1 overflow-auto p-8 font-mono text-[0.85rem] leading-relaxed text-slate-700 selection:bg-blue-100 bg-white">
                    <pre className="whitespace-pre-wrap">{typeof selectedArtifact.content === 'string' ? selectedArtifact.content : JSON.stringify(selectedArtifact.content, null, 2)}</pre>
                 </div>
              </div>
@@ -501,28 +504,28 @@ const App: React.FC = () => {
 // --- Sub-components ---
 
 const PanelHeader = ({ title }: { title: string }) => (
-  <div className="px-6 py-4 bg-white/[0.02] border-b border-white/5 text-[0.65rem] font-black text-[#475569] uppercase tracking-[0.25em]">
+  <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 text-[0.65rem] font-black text-slate-400 uppercase tracking-[0.25em]">
     {title}
   </div>
 );
 
 const Card = ({ title, icon, children, color = "blue" }: { title: string, icon: React.ReactNode, children: React.ReactNode, color?: string }) => (
-  <div className="bg-[#121620]/40 border border-white/5 rounded-2xl overflow-hidden shadow-sm">
-    <div className="px-4 py-3 bg-white/[0.01] border-b border-white/5 flex items-center gap-2">
-       <span className={cn(color === "orange" ? "text-orange-400" : "text-blue-400")}>{icon}</span>
-       <span className="text-[0.7rem] font-bold text-[#94a3b8] uppercase tracking-wider">{title}</span>
+  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+       <span className={cn(color === "orange" ? "text-orange-600" : "text-blue-600")}>{icon}</span>
+       <span className="text-[0.7rem] font-bold text-slate-500 uppercase tracking-wider">{title}</span>
     </div>
     <div className="p-4">{children}</div>
   </div>
 );
 
 const MetricCard = ({ label, value, icon, className }: { label: string, value: string | number, icon: React.ReactNode, className?: string }) => (
-  <div className={cn("bg-[#1a202c]/50 border border-white/5 rounded-2xl p-4 flex flex-col gap-1 shadow-sm group hover:border-blue-500/20 transition-all", className)}>
-    <div className="flex items-center gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
-       <span className="text-blue-400">{icon}</span>
-       <span className="text-[0.6rem] font-black text-[#64748b] uppercase tracking-widest">{label}</span>
+  <div className={cn("bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-1 shadow-sm group hover:border-blue-500/20 transition-all", className)}>
+    <div className="flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-all">
+       <span className="text-blue-600">{icon}</span>
+       <span className="text-[0.6rem] font-black text-slate-500 uppercase tracking-widest">{label}</span>
     </div>
-    <span className="text-xl font-black font-mono text-white mt-1">{value}</span>
+    <span className="text-xl font-black font-mono text-slate-900 mt-1">{value}</span>
   </div>
 );
 
@@ -538,10 +541,10 @@ const HealthMetric = ({ label, value, color }: { label: string, value: number | 
   return (
     <div className="space-y-1.5">
        <div className="flex justify-between items-center text-[0.65rem] font-bold">
-          <span className="text-[#64748b]">{label}</span>
-          <span className="text-[#94a3b8] font-mono">{(v * 100).toFixed(0)}%</span>
+          <span className="text-slate-500">{label}</span>
+          <span className="text-slate-700 font-mono">{(v * 100).toFixed(0)}%</span>
        </div>
-       <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+       <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
           <div className={cn("h-full transition-all duration-500", colors[color as keyof typeof colors])} style={{ width: `${pct}%` }} />
        </div>
     </div>
@@ -550,12 +553,12 @@ const HealthMetric = ({ label, value, color }: { label: string, value: number | 
 
 const HeaderAction = ({ onClick, icon, label, variant }: { onClick: () => void, icon: React.ReactNode, label: string, variant: 'warning' | 'success' | 'danger' }) => {
   const styles = {
-    warning: "border-orange-500/20 text-orange-400 hover:bg-orange-500/10",
-    success: "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10",
-    danger: "border-red-500/20 text-red-400 hover:bg-red-500/10"
+    warning: "border-orange-200 text-orange-700 hover:bg-orange-50 bg-orange-50/50",
+    success: "border-emerald-200 text-emerald-700 hover:bg-emerald-50 bg-emerald-50/50",
+    danger: "border-red-200 text-red-700 hover:bg-red-50 bg-red-50/50"
   };
   return (
-    <button onClick={onClick} className={cn("px-4 py-2 bg-[#1a202c] border rounded-xl flex items-center gap-2 text-xs font-bold transition-all active:scale-95", styles[variant])}>
+    <button onClick={onClick} className={cn("px-4 py-2 border rounded-xl flex items-center gap-2 text-xs font-bold transition-all active:scale-95", styles[variant])}>
       {icon} {label}
     </button>
   );
@@ -564,35 +567,35 @@ const HeaderAction = ({ onClick, icon, label, variant }: { onClick: () => void, 
 const EventRow = ({ event }: { event: RuntimeEvent }) => {
   const [expanded, setExpanded] = useState(false);
   const typeStyles = {
-    plan: "text-purple-400 bg-purple-400/5",
-    approval: "text-orange-400 bg-orange-400/5",
-    goal: "text-emerald-400 bg-emerald-400/5",
-    error: "text-red-400 bg-red-400/5",
-    tool: "text-blue-400 bg-blue-400/5"
+    plan: "text-purple-700 bg-purple-50 border-purple-100",
+    approval: "text-orange-700 bg-orange-50 border-orange-100",
+    goal: "text-emerald-700 bg-emerald-50 border-emerald-100",
+    error: "text-red-700 bg-red-50 border-red-100",
+    tool: "text-blue-700 bg-blue-50 border-blue-100"
   };
   const typeKey = event.type.split('_')[0] as keyof typeof typeStyles;
   
   return (
     <div 
-      className={cn("px-8 py-5 hover:bg-white/[0.01] cursor-pointer transition-all border-l-2 border-transparent", expanded && "bg-white/[0.02] border-blue-500/50")}
+      className={cn("px-8 py-5 hover:bg-slate-50 cursor-pointer transition-all border-l-4 border-transparent", expanded && "bg-slate-50/50 border-blue-500")}
       onClick={() => setExpanded(!expanded)}
     >
       <div className="flex gap-6 items-start">
-        <div className="text-[0.65rem] font-mono text-[#475569] font-bold pt-1 w-8">{event.seq}</div>
+        <div className="text-[0.65rem] font-mono text-slate-400 font-bold pt-1 w-8">{event.seq}</div>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-center mb-1.5">
-            <span className={cn("text-[0.65rem] font-black font-mono px-2 py-0.5 rounded tracking-tighter uppercase", typeStyles[typeKey] || "text-[#94a3b8] bg-white/5")}>
+            <span className={cn("text-[0.65rem] font-black font-mono px-2 py-0.5 rounded border tracking-tighter uppercase", typeStyles[typeKey] || "text-slate-500 bg-slate-50 border-slate-100")}>
               {event.type}
             </span>
-            <span className="text-[0.6rem] font-bold text-[#475569] font-mono">
+            <span className="text-[0.6rem] font-bold text-slate-400 font-mono">
               {new Date(event.created_at * 1000).toLocaleTimeString()}
             </span>
           </div>
-          <div className={cn("text-[0.8rem] text-[#94a3b8] font-mono line-clamp-1 opacity-80", expanded && "hidden")}>
+          <div className={cn("text-[0.85rem] text-slate-600 font-medium line-clamp-1 opacity-90", expanded && "hidden")}>
             {JSON.stringify(event.payload)}
           </div>
           {expanded && (
-            <div className="mt-3 bg-black/40 border border-white/5 rounded-2xl p-5 text-[0.7rem] font-mono text-blue-200/60 whitespace-pre-wrap break-all shadow-inner leading-relaxed">
+            <div className="mt-3 bg-slate-100 border border-slate-200 rounded-2xl p-5 text-[0.75rem] font-mono text-slate-700 whitespace-pre-wrap break-all shadow-inner leading-relaxed">
               {JSON.stringify(event.payload, null, 2)}
             </div>
           )}
@@ -603,7 +606,7 @@ const EventRow = ({ event }: { event: RuntimeEvent }) => {
 };
 
 const StateInspector = ({ state }: { state: AgentState | null }) => {
-  if (!state) return <div className="text-[0.7rem] text-[#475569] py-8 text-center font-medium italic">Introspection layer offline</div>;
+  if (!state) return <div className="text-[0.7rem] text-slate-400 py-8 text-center font-medium italic">Introspection layer offline</div>;
 
   const fields = [
     { key: 'active_focus', label: 'Active Focus', icon: <Activity className="w-3 h-3" /> },
@@ -630,19 +633,19 @@ const StateInspector = ({ state }: { state: AgentState | null }) => {
 const AccordionItem = ({ label, icon, value }: { label: string, icon: React.ReactNode, value: unknown }) => {
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("bg-[#1a202c]/30 border border-white/5 rounded-xl overflow-hidden transition-all", open && "border-blue-500/20 bg-[#1a202c]/60 shadow-lg")}>
+    <div className={cn("bg-slate-50 border border-slate-200 rounded-xl overflow-hidden transition-all shadow-sm", open && "border-blue-500/20 bg-slate-100")}>
       <div 
         onClick={() => setOpen(!open)}
-        className="px-4 py-3 cursor-pointer hover:bg-white/[0.02] flex items-center justify-between transition-all"
+        className="px-4 py-3 cursor-pointer hover:bg-slate-200/50 flex items-center justify-between transition-all"
       >
         <div className="flex items-center gap-3">
-          <span className={cn("transition-colors", open ? "text-blue-400" : "text-[#475569]")}>{icon}</span>
-          <span className={cn("text-[0.75rem] font-bold tracking-tight transition-colors", open ? "text-white" : "text-[#94a3b8]")}>{label}</span>
+          <span className={cn("transition-colors", open ? "text-blue-600" : "text-slate-400")}>{icon}</span>
+          <span className={cn("text-[0.75rem] font-bold tracking-tight transition-colors", open ? "text-slate-900" : "text-slate-600")}>{label}</span>
         </div>
-        <ChevronDown className={cn("w-3 h-3 text-[#475569] transition-transform duration-300", open && "rotate-180 text-blue-400")} />
+        <ChevronDown className={cn("w-3 h-3 text-slate-400 transition-transform duration-300", open && "rotate-180 text-blue-600")} />
       </div>
       {open && (
-        <div className="px-4 pb-4 pt-0 border-t border-white/[0.03] text-[0.65rem] font-mono text-[#94a3b8] whitespace-pre-wrap leading-relaxed overflow-x-auto selection:bg-blue-500/30">
+        <div className="px-4 pb-4 pt-0 border-t border-slate-200 text-[0.7rem] font-mono text-slate-700 whitespace-pre-wrap leading-relaxed overflow-x-auto selection:bg-blue-100">
           <div className="py-3">
             {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '')}
           </div>
@@ -658,10 +661,10 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<strin
   const [maxActions, setMaxActions] = useState(10);
 
   return (
-    <div className="bg-[#121620] border border-white/10 rounded-[2rem] w-[540px] shadow-2xl overflow-hidden shadow-blue-500/10">
-      <div className="p-8 border-b border-white/5 bg-white/[0.01]">
-        <h2 className="text-2xl font-black tracking-tight">Initialize Objective</h2>
-        <p className="text-sm font-medium text-[#64748b] mt-1">Configure the bounded goal and constraints for the cognitive runtime.</p>
+    <div className="bg-white border border-slate-200 rounded-[2rem] w-[540px] shadow-2xl overflow-hidden">
+      <div className="p-8 border-b border-slate-100 bg-slate-50">
+        <h2 className="text-2xl font-black tracking-tight text-slate-900">Initialize Objective</h2>
+        <p className="text-sm font-medium text-slate-500 mt-1">Configure the bounded goal and constraints for the cognitive runtime.</p>
       </div>
       <div className="p-8 space-y-6">
         <div className="space-y-2">
@@ -669,7 +672,7 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<strin
           <select 
             value={type} 
             onChange={(e) => setType(e.target.value)}
-            className="w-full bg-[#0a0d14] border border-white/10 rounded-2xl p-4 text-sm font-semibold focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
+            className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-sm font-semibold focus:outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer text-slate-900"
           >
             <option value="operator_request">Operator Request</option>
             <option value="dynamic_llm">Dynamic LLM Plan</option>
@@ -692,7 +695,7 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<strin
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={type === 'dynamic_llm' ? "Describe what you want in plain English — e.g. 'List the src folder and summarize what you find'" : "Define the specific achievement criteria..."}
-            className="w-full bg-[#0a0d14] border border-white/10 rounded-2xl p-4 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all min-h-[120px] resize-none placeholder:text-[#475569]"
+            className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-sm font-medium focus:outline-none focus:border-blue-500 transition-all min-h-[120px] resize-none placeholder:text-slate-400 text-slate-900"
           />
         </div>
         <div className="grid grid-cols-1 gap-6">
@@ -703,18 +706,18 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<strin
                 type="number" 
                 value={maxActions}
                 onChange={(e) => setMaxActions(parseInt(e.target.value) || 0)}
-                className="w-full bg-[#0a0d14] border border-white/10 rounded-2xl p-4 text-sm font-mono font-bold focus:outline-none focus:border-blue-500/50 transition-all"
+                className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-sm font-mono font-bold focus:outline-none focus:border-blue-500 transition-all text-slate-900"
               />
-              <div className="absolute right-4 top-4 text-[0.6rem] font-black text-[#475569] uppercase">Actions</div>
+              <div className="absolute right-4 top-4 text-[0.6rem] font-black text-slate-400 uppercase">Actions</div>
             </div>
           </div>
         </div>
       </div>
-      <div className="p-8 bg-white/[0.02] flex justify-end gap-4 border-t border-white/5">
-        <button onClick={onCancel} className="px-6 py-3 text-sm font-black text-[#475569] hover:text-white transition-colors uppercase tracking-widest">Abort</button>
+      <div className="p-8 bg-slate-50 flex justify-end gap-4 border-t border-slate-100">
+        <button onClick={onCancel} className="px-6 py-3 text-sm font-black text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-widest">Abort</button>
         <button 
           onClick={() => onSubmit({ goal: { type, description }, config: { max_actions: maxActions } })}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-xl shadow-blue-600/30 active:scale-95 uppercase tracking-widest"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95 uppercase tracking-widest"
         >
           Initialize Thread
         </button>
@@ -724,88 +727,144 @@ const GoalComposer = ({ onSubmit, onCancel }: { onSubmit: (payload: Record<strin
 };
 
 const HelpTab = () => (
-  <div className="p-8 h-full overflow-y-auto bg-[#0a0d14] text-[#cbd5e0]">
+  <div className="p-8 h-full overflow-y-auto bg-white text-slate-700">
     <div className="max-w-2xl mx-auto space-y-8">
       <div>
-        <h2 className="text-2xl font-black text-white mb-2 tracking-tight">How to Use the Human Runtime</h2>
-        <p className="text-[#94a3b8] leading-relaxed">
-          Welcome to the Human Cognitive Runtime operator console. This is a bounded local assistant runtime. It can run in two modes: <strong className="text-white">Deterministic</strong> (hard-coded plan templates) or <strong className="text-violet-400">LLM-powered</strong> via a locally running Ollama model (<code className="bg-white/10 px-1 rounded text-xs">llama3.2</code>). The LLM mode allows you to write any natural-language goal and have the system plan and execute it dynamically.
+        <h2 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">How to Use the Human Runtime</h2>
+        <p className="text-slate-500 leading-relaxed">
+          Welcome to the Human Cognitive Runtime operator console. This is a bounded local assistant runtime. It can run in two modes: <strong className="text-slate-900">Deterministic</strong> (hard-coded plan templates) or <strong className="text-violet-600">LLM-powered</strong> via a locally running Ollama model (<code className="bg-slate-100 px-1 rounded text-xs text-slate-900">llama3.2</code>). The LLM mode allows you to write any natural-language goal and have the system plan and execute it dynamically.
         </p>
       </div>
 
       <div className="space-y-6">
-        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
-          <h3 className="text-lg font-bold text-blue-400 mb-3 flex items-center gap-2">
+        <div className="bg-slate-50 border border-slate-200 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-blue-600 mb-3 flex items-center gap-2">
             <Plus className="w-5 h-5" /> 1. Start a New Run
           </h3>
           <p className="text-sm leading-relaxed mb-3">
             Click the <strong>New Cognitive Run</strong> button at the bottom of the left sidebar. This opens the Goal Composer where you can define an objective.
           </p>
-          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+          <ul className="list-disc list-inside text-sm text-slate-500 space-y-1 ml-2">
             <li><strong>Tactical Mode:</strong> Select <em>Dynamic LLM Plan</em> to write any natural language goal and have Ollama (llama3.2) generate the steps automatically. Or pick a template mode for structured execution.</li>
             <li><strong>Description:</strong> Type what you want the system to achieve. In LLM mode, be as descriptive as you like.</li>
             <li><strong>Max Actions:</strong> A safety constraint on how many steps it's allowed to take before stopping.</li>
           </ul>
         </div>
 
-        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
-          <h3 className="text-lg font-bold text-emerald-400 mb-3 flex items-center gap-2">
+        <div className="bg-slate-50 border border-slate-200 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-emerald-600 mb-3 flex items-center gap-2">
             <Activity className="w-5 h-5" /> 2. Monitor Live Status
           </h3>
           <p className="text-sm leading-relaxed mb-3">
             Once a run is active, the center column displays the live execution stream.
           </p>
-          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+          <ul className="list-disc list-inside text-sm text-slate-500 space-y-1 ml-2">
             <li><strong>Timeline:</strong> An Event Sourcing view showing every cognitive cycle, tool call, and plan update in real-time. Click an event to view its full JSON payload.</li>
             <li><strong>Cognitive Graph:</strong> A visual representation of the agent's internal state (Goals, Plans, Focus Candidates, and Tensions).</li>
           </ul>
         </div>
 
-        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
-          <h3 className="text-lg font-bold text-orange-400 mb-3 flex items-center gap-2">
+        <div className="bg-slate-50 border border-slate-200 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-orange-600 mb-3 flex items-center gap-2">
             <Eye className="w-5 h-5" /> 3. Approve or Deny Actions
           </h3>
           <p className="text-sm leading-relaxed mb-3">
             The runtime features an authority model. Some tool calls may require explicit operator approval.
           </p>
-          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+          <ul className="list-disc list-inside text-sm text-slate-500 space-y-1 ml-2">
             <li>Watch the <strong>Operator Approval Queue</strong> in the right-hand column.</li>
             <li>Review the requested action and arguments, then click <strong>Approve</strong> or <strong>Deny</strong> to unblock the agent.</li>
           </ul>
         </div>
 
-        <div className="bg-white/[0.02] border border-white/5 p-6 rounded-2xl">
-          <h3 className="text-lg font-bold text-purple-400 mb-3 flex items-center gap-2">
+        <div className="bg-slate-50 border border-slate-200 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-purple-600 mb-3 flex items-center gap-2">
             <Layers className="w-5 h-5" /> 4. Inspect State & Artifacts
           </h3>
           <p className="text-sm leading-relaxed mb-3">
             Explore the internal representation of the system using the inspector panels on the left and right.
           </p>
-          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
+          <ul className="list-disc list-inside text-sm text-slate-500 space-y-1 ml-2">
             <li><strong>Runtime Health & Plan (Left):</strong> Check the uncertainty load, goal drift, and view the multi-step execution plan.</li>
             <li><strong>Cognitive State Inspector (Right):</strong> Expand internal arrays like Hypotheses and Working Memory.</li>
             <li><strong>Artifact Browser (Right):</strong> Click any generated artifact to read its complete content in a modal window.</li>
           </ul>
         </div>
 
-        <div className="bg-violet-500/10 border border-violet-500/20 p-6 rounded-2xl">
-          <h3 className="text-lg font-bold text-violet-400 mb-3 flex items-center gap-2">
+        <div className="bg-violet-50 border border-violet-200 p-6 rounded-2xl">
+          <h3 className="text-lg font-bold text-violet-600 mb-3 flex items-center gap-2">
             <Zap className="w-5 h-5" /> 5. Using LLM Mode (Recommended)
           </h3>
           <p className="text-sm leading-relaxed mb-3">
             The <strong>Dynamic LLM Plan</strong> mode uses Ollama running locally on your machine to generate a plan from any natural language goal.
           </p>
-          <ul className="list-disc list-inside text-sm text-[#94a3b8] space-y-1 ml-2">
-            <li>Ensure the <strong className="text-violet-400">LLM Ready</strong> indicator is lit in the header bar.</li>
+          <ul className="list-disc list-inside text-sm text-slate-500 space-y-1 ml-2">
+            <li>Ensure the <strong className="text-violet-600">LLM Ready</strong> indicator is lit in the header bar.</li>
             <li>Click <strong>New Cognitive Run</strong>, select <strong>Dynamic LLM Plan</strong> from the dropdown.</li>
-            <li>Type a goal in plain English, e.g.: <em className="text-white">"List the src/ folder and write a summary of each file"</em></li>
+            <li>Type a goal in plain English, e.g.: <em className="text-slate-900 italic">"List the src/ folder and write a summary of each file"</em></li>
             <li>The LLM will generate a step-by-step execution plan. The runtime will then execute each step.</li>
-            <li>If the LLM Offline indicator is red, make sure the Ollama desktop app is running, or run <code className="bg-white/10 px-1 rounded text-xs">ollama serve</code> in a terminal.</li>
+            <li>If the LLM Offline indicator is red, make sure the Ollama desktop app is running, or run <code className="bg-slate-100 px-1 rounded text-xs text-slate-900">ollama serve</code> in a terminal.</li>
           </ul>
         </div>
       </div>
     </div>
   </div>
 );
+
+const AIResponseTab = ({ events }: { events: RuntimeEvent[] }) => {
+  const filteredEvents = events.filter(e => 
+    ['thought', 'plan_generated', 'action_option_selected', 'observation', 'cycle_transition'].includes(e.type)
+  );
+
+  return (
+    <div className="h-full overflow-y-auto p-8 bg-slate-50/30">
+      <div className="max-w-3xl mx-auto space-y-6">
+        {filteredEvents.map((e, i) => (
+          <div key={i} className={cn(
+            "p-6 rounded-2xl border transition-all animate-in slide-in-from-bottom-2 duration-500",
+            e.type === 'thought' ? "bg-violet-50 border-violet-100 text-violet-900" :
+            e.type === 'plan_generated' ? "bg-indigo-50 border-indigo-100 text-indigo-900" :
+            "bg-white border-slate-200 text-slate-800 shadow-sm"
+          )}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                 <div className={cn(
+                   "w-8 h-8 rounded-lg flex items-center justify-center",
+                   e.type === 'thought' ? "bg-violet-200 text-violet-700" :
+                   e.type === 'plan_generated' ? "bg-indigo-200 text-indigo-700" :
+                   "bg-slate-100 text-slate-500"
+                 )}>
+                    {e.type === 'thought' ? <Cpu className="w-4 h-4" /> :
+                     e.type === 'plan_generated' ? <Layers className="w-4 h-4" /> :
+                     <Activity className="w-4 h-4" />}
+                 </div>
+                 <span className="text-[0.65rem] font-black uppercase tracking-widest opacity-60">{e.type.replace('_', ' ')}</span>
+              </div>
+              <span className="text-[0.6rem] font-mono font-bold opacity-40">{new Date(e.created_at * 1000).toLocaleTimeString()}</span>
+            </div>
+            <div className="text-[0.9rem] leading-relaxed font-medium">
+               {e.type === 'thought' && <p className="italic">"{String((e.payload as any)?.thought || JSON.stringify(e.payload))}"</p>}
+               {e.type === 'plan_generated' && (
+                 <div className="space-y-3">
+                    <p className="font-bold">Generated execution strategy:</p>
+                    <pre className="text-xs bg-black/5 p-3 rounded-xl overflow-x-auto">{JSON.stringify(e.payload, null, 2)}</pre>
+                 </div>
+               )}
+               {!['thought', 'plan_generated'].includes(e.type) && (
+                 <pre className="text-xs opacity-80 whitespace-pre-wrap">{JSON.stringify(e.payload, null, 2)}</pre>
+               )}
+            </div>
+          </div>
+        ))}
+        {filteredEvents.length === 0 && (
+          <div className="h-64 flex flex-col items-center justify-center text-slate-300 gap-4">
+             <MessageSquare className="w-12 h-12 opacity-20" />
+             <div className="text-xs font-black uppercase tracking-widest">Awaiting Cognitive Response</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default App;
